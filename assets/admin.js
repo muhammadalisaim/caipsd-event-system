@@ -443,7 +443,7 @@ function participantCell(row) {
 function ticketsTable(rows, withActions) {
   if (!rows.length) return '<div class="empty-table">No tickets found. Use “Issue ticket” to create the first one.</div>';
   const head = `<tr><th>PARTICIPANT</th><th>PHONE</th><th>TICKET ID</th><th>VALID UNTIL</th><th>STATUS</th><th>EMAIL</th>${withActions ? '<th></th>' : ''}</tr>`;
-  const body = rows.map((row) => `<tr><td>${participantCell(row)}</td><td>${escapeHtml(row.phone)}</td><td><strong>${escapeHtml(row.ticket_code)}</strong></td><td>${escapeHtml(dateTimeLabel(row.valid_until))}</td><td>${ticketPill(row)}</td><td>${emailPill(row)}</td>${withActions ? `<td><div class="row-actions"><a class="status-action" href="/ticket.html?code=${encodeURIComponent(row.ticket_code)}" target="_blank" rel="noopener">View</a><button class="status-action send-ticket" data-id="${row.id}" data-email="${escapeHtml(row.email)}">${row.email_status === 'sent' ? 'Resend' : 'Send email'}</button><button class="status-action danger cancel-ticket" data-id="${row.id}" data-name="${escapeHtml(row.full_name)}">Cancel</button></div></td>` : ''}</tr>`).join('');
+  const body = rows.map((row) => `<tr><td>${participantCell(row)}</td><td>${escapeHtml(row.phone)}</td><td><strong>${escapeHtml(row.ticket_code)}</strong></td><td>${escapeHtml(dateTimeLabel(row.valid_until))}</td><td>${ticketPill(row)}</td><td>${emailPill(row)}</td>${withActions ? `<td><div class="row-actions"><a class="status-action" href="ticket.html?code=${encodeURIComponent(row.ticket_code)}" target="_blank" rel="noopener">View</a><button class="status-action send-ticket" data-id="${row.id}" data-email="${escapeHtml(row.email)}">${row.email_status === 'sent' ? 'Resend' : 'Send email'}</button><button class="status-action danger cancel-ticket" data-id="${row.id}" data-name="${escapeHtml(row.full_name)}">Cancel</button></div></td>` : ''}</tr>`).join('');
   return `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
@@ -480,6 +480,23 @@ $('#filter-status').addEventListener('change', loadTickets);
 
 async function exportCsv() {
   try {
+    if (isStaticHost) {
+      const rows = getLocalTickets();
+      const label = { valid: 'Valid - not entered', checked_in: 'Entered', expired: 'Expired' };
+      const headers = ['Participant', 'Email', 'Phone', 'Ticket ID', 'Issued at', 'Valid until', 'Status', 'Entries', 'First entry', 'Last entry', 'Email status'];
+      const values = rows.map((r) => [r.full_name, r.email, r.phone, r.ticket_code, r.issued_at, r.valid_until, label[r.status] || r.status, r.entry_count, r.first_entry_at || '', r.last_entry_at || '', r.email_status]);
+      const escapeCsv = (value) => {
+        let text = String(value ?? '');
+        if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+        return `"${text.replace(/"/g, '""')}"`;
+      };
+      const csv = [headers, ...values].map((line) => line.map(escapeCsv).join(',')).join('\r\n');
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv; charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'caipsd-tickets.csv';
+      document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+      return;
+    }
     const response = await fetch('/api/admin/export.csv', { credentials: 'same-origin' });
     if (!response.ok) { const result = await response.json(); throw new Error(result.error || 'Export failed.'); }
     const url = URL.createObjectURL(await response.blob());
