@@ -751,7 +751,7 @@ function showLogin() {
   $('#admin-app').hidden = true;
   $('#login-screen').hidden = false;
   if ($('#admin-session-banner')) $('#admin-session-banner').style.display = 'none';
-  if ($('#header-login-btn')) $('#header-login-btn').textContent = '🔐 Organizer Sign In';
+  if ($('#header-login-btn')) $('#header-login-btn').style.display = 'none';
   $('#login-error').textContent = '';
   $('#login-form').reset();
   setFrontTab('checkin');
@@ -765,7 +765,10 @@ function showApp(email) {
   $('#admin-email').textContent = email || 'Organizer';
   $('#admin-avatar').textContent = (email || 'A').charAt(0).toUpperCase();
   if ($('#session-banner-email')) $('#session-banner-email').textContent = email || 'Organizer';
-  if ($('#header-login-btn')) $('#header-login-btn').textContent = '⚡ Workspace →';
+  if ($('#header-login-btn')) {
+    $('#header-login-btn').style.display = 'inline-flex';
+    $('#header-login-btn').innerHTML = '<span>⚡ Workspace →</span>';
+  }
   loadConfig().then(loadDashboard);
 }
 
@@ -774,6 +777,9 @@ function openGateCheckin() {
   $('#login-screen').hidden = false;
   if (currentAdminEmail && $('#admin-session-banner')) {
     $('#admin-session-banner').style.display = 'flex';
+  }
+  if (currentAdminEmail && $('#header-login-btn')) {
+    $('#header-login-btn').style.display = 'inline-flex';
   }
   setFrontTab('checkin');
   document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });

@@ -46,8 +46,8 @@
             <span class="pulse-indicator"></span>
             <span class="station-text">Station 01 · Live</span>
           </div>
-          <button type="button" class="btn-header-admin" id="header-login-btn">
-            <span>🔐 Organizer Sign In</span>
+          <button type="button" class="btn-header-admin" id="header-login-btn" style="display: none;">
+            <span>⚡ Open Workspace →</span>
           </button>
           <button type="button" class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Toggle navigation">☰</button>
         </div>
@@ -124,6 +124,7 @@
                       <span class="reticle-corner r-tr"></span>
                       <span class="reticle-corner r-bl"></span>
                       <span class="reticle-corner r-br"></span>
+                      <div class="laser-scanner-line"></div>
                       <div class="reticle-center-icon">
                         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
                           <rect x="3" y="3" width="7" height="7" rx="1.5"/>
@@ -178,7 +179,7 @@
                   <div class="manual-input-group">
                     <div class="ticket-input-wrapper">
                       <span class="ticket-prefix-icon">🎟</span>
-                      <input id="ticket-code-input" name="ticketCode" required maxlength="40" placeholder="e.g. CAIP-7B3F-9K2L-8M4N" autocomplete="off" spellcheck="false">
+                      <input id="ticket-code-input" name="ticketCode" required maxlength="40" placeholder="CAIP-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
                     </div>
                     <button class="btn-manual-verify" type="submit">
                       <span>Verify &amp; Admit</span>
