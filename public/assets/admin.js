@@ -55,6 +55,31 @@ const GOOGLE_APPS_SCRIPT_CODE = `/**
 
 var TARGET_SPREADSHEET_ID = "12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o";
 
+/**
+ * ==============================================================================
+ * STEP 1: SELECT "authorizeAndSendTestEmail" IN DROPDOWN AND CLICK "RUN" ▶️
+ * ==============================================================================
+ * Is function ko Apps Script editor mein 1 bar "Run" (▶️) karein.
+ * Google aap se "Authorization Required" maangay ga:
+ * Review Permissions -> Apna Google Account select karein -> Advanced -> Go to ... (unsafe) -> Allow.
+ * Is se foran aapke inbox mein test email aa jayegi aur email permission active ho jayegi!
+ */
+function authorizeAndSendTestEmail() {
+  var ss = getSpreadsheet();
+  var myEmail = Session.getActiveUser().getEmail() || ss.getOwner().getEmail() || "saimmalik4728@gmail.com";
+  MailApp.sendEmail({
+    to: myEmail,
+    subject: "CAIPSD Event System - Google Mail Activated Successfully!",
+    htmlBody: "<div style='font-family:Arial,sans-serif;padding:24px;border:1px solid #e2e8f0;border-left:6px solid #22c55e;border-radius:8px;max-width:520px;'>" +
+      "<h2 style='color:#1c304e;margin-top:0;'>✓ Google Mail Permission Granted!</h2>" +
+      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Aapka Google Account tickets aur QR passes send karne ke liye authorize ho chuka hai.</p>" +
+      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Ab aap CAIPSD portal par ja kar kisi bhi student ko 1-click se ticket email kar sakte hain.</p>" +
+      "<div style='margin-top:16px;padding:10px 14px;background:#f8fafc;border-radius:6px;font-size:12px;color:#64748b;'>CAIPSD Event Management — The Islamia University of Bahawalpur</div>" +
+      "</div>"
+  });
+  Logger.log("✓ Success! Test email sent to: " + myEmail);
+}
+
 function getSpreadsheet() {
   try {
     var active = SpreadsheetApp.getActiveSpreadsheet();
@@ -223,28 +248,41 @@ function doPost(e) {
         '</td></tr>' +
         '</table></td></tr></table></body></html>';
 
-      MailApp.sendEmail({
-        to: recipient,
-        subject: 'Your CAIPSD Event Pass - ' + ticketCode,
-        htmlBody: html
-      });
-
-      return respondJson({ status: 'ok', message: 'Ticket email delivered to ' + recipient });
+      try {
+        MailApp.sendEmail({
+          to: recipient,
+          subject: 'Your CAIPSD Event Pass - ' + ticketCode,
+          htmlBody: html
+        });
+        return respondJson({ status: 'ok', message: 'Ticket email delivered to ' + recipient });
+      } catch (err) {
+        return respondJson({
+          status: 'error',
+          message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
+        });
+      }
     }
 
     if (action === 'sendTestEmail') {
       var to = payload.to || (payload.ticket && payload.ticket.email) || ss.getOwner().getEmail();
-      MailApp.sendEmail({
-        to: to,
-        subject: 'CAIPSD Event System - Email Test',
-        htmlBody: '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
-          '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
-          '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
-          '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
-          '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
-          '</div>'
-      });
-      return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
+      try {
+        MailApp.sendEmail({
+          to: to,
+          subject: 'CAIPSD Event System - Email Test',
+          htmlBody: '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
+            '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
+            '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
+            '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
+            '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
+            '</div>'
+        });
+        return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
+      } catch (err) {
+        return respondJson({
+          status: 'error',
+          message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
+        });
+      }
     }
 
     return respondJson({ status: 'error', message: 'Unknown action: ' + action });
@@ -257,6 +295,28 @@ function doPost(e) {
 
 function doGet(e) {
   var action = (e && e.parameter && e.parameter.action) || 'ping';
+  if (action === 'sendTestEmail') {
+    var to = (e && e.parameter && e.parameter.to) || 'saimmalik4728@gmail.com';
+    try {
+      MailApp.sendEmail({
+        to: to,
+        subject: 'CAIPSD Event System - Email Test',
+        htmlBody: '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
+          '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
+          '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
+          '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
+          '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
+          '</div>'
+      });
+      return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
+    } catch (err) {
+      return respondJson({
+        status: 'error',
+        message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
+      });
+    }
+  }
+
   if (action === 'getAll') {
     var ss = getSpreadsheet();
     var sheet = ss.getSheetByName('CAIPSD_Tickets') || ss.getSheets()[0];
@@ -399,16 +459,28 @@ async function pushTicketEmailToSheet(ticket) {
     ticketCode: ticket.ticket_code,
     fullName: ticket.full_name
   };
+  let result = null;
   try {
-    await fetch(GOOGLE_WEB_APP_URL, {
+    const res = await fetch(GOOGLE_WEB_APP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      mode: 'no-cors'
+      body: JSON.stringify(payload)
     });
+    result = await res.json().catch(() => null);
   } catch (err) {
-    console.warn('pushTicketEmailToSheet warning:', err);
+    try {
+      await fetch(GOOGLE_WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        mode: 'no-cors'
+      });
+    } catch {}
   }
+  if (result && result.status === 'error') {
+    throw new Error(result.message || 'Google Mail Error');
+  }
+  return result;
 }
 
 async function pushTestEmailToSheet(to) {
@@ -417,16 +489,28 @@ async function pushTestEmailToSheet(to) {
     action: 'sendTestEmail',
     to: to
   };
+  let result = null;
   try {
-    await fetch(GOOGLE_WEB_APP_URL, {
+    const res = await fetch(GOOGLE_WEB_APP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      mode: 'no-cors'
+      body: JSON.stringify(payload)
     });
+    result = await res.json().catch(() => null);
   } catch (err) {
-    console.warn('pushTestEmailToSheet warning:', err);
+    try {
+      await fetch(GOOGLE_WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        mode: 'no-cors'
+      });
+    } catch {}
   }
+  if (result && result.status === 'error') {
+    throw new Error(result.message || 'Google Mail Error');
+  }
+  return result;
 }
 
 async function syncTicketsFromGoogleSheet() {
@@ -725,12 +809,31 @@ async function handleStaticApi(url, options = {}) {
       return true;
     });
 
+    let sent = 0;
+    let failed = 0;
+    let lastErr = null;
     for (const t of targets) {
-      await pushTicketEmailToSheet(t);
-      t.email_status = 'sent';
+      try {
+        await pushTicketEmailToSheet(t);
+        t.email_status = 'sent';
+        sent++;
+      } catch (err) {
+        t.email_status = 'failed';
+        t.email_error = err.message;
+        failed++;
+        lastErr = err;
+      }
     }
     saveLocalTickets(list);
-    return { total: targets.length, sent: targets.length, failed: 0, message: `Completed: ${targets.length} tickets emailed successfully!` };
+    if (failed > 0 && sent === 0) {
+      throw lastErr || new Error('Email sending failed.');
+    }
+    return {
+      total: targets.length,
+      sent,
+      failed,
+      message: `Completed: ${sent} tickets emailed successfully!${failed ? ` (${failed} failed)` : ''}`
+    };
   }
 
   if (url.startsWith('/api/admin/tickets/') && method === 'DELETE') {
@@ -1141,8 +1244,10 @@ async function triggerTestEmail() {
       body: JSON.stringify({ to: recipient.trim() })
     });
     toast(res.message);
+    alert('✓ ' + res.message);
   } catch (err) {
     toast(err.message, 'error');
+    alert(err.message);
   }
 }
 $('#test-mail-btn')?.addEventListener('click', triggerTestEmail);
@@ -1158,7 +1263,7 @@ async function copyAppsScriptCode() {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(scriptCode);
       toast('✓ Google Apps Script copied to clipboard!');
-      alert('✓ Google Apps Script copied to clipboard!\n\nTo activate 1-click email sending:\n1. Open your Google Sheet\n2. Go to Extensions > Apps Script\n3. Select All (Ctrl+A), Paste (Ctrl+V), and Save (Ctrl+S)\n4. Deploy > Manage deployments > Edit > New version > Deploy');
+      alert('✓ Google Apps Script copied to clipboard!\n\nNext steps in your Google Sheet:\n1. Open Extensions > Apps Script\n2. Select All (Ctrl+A), Paste (Ctrl+V), and Save (Ctrl+S)\n3. From the top dropdown, select "authorizeAndSendTestEmail" and click "Run" (▶️)\n4. Click "Review permissions" -> Select your Google Account -> Advanced -> Go to ... (unsafe) -> Allow\n5. Click Deploy > Manage deployments > Edit (pencil icon) > Version: New version > Deploy');
     } else {
       prompt('Copy this Google Apps Script code (Ctrl+C):', scriptCode);
     }

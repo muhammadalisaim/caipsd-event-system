@@ -374,6 +374,31 @@ function getAppsScriptTemplate(customSpreadsheetId) {
 
 var TARGET_SPREADSHEET_ID = "${targetId}";
 
+/**
+ * ==============================================================================
+ * STEP 1: SELECT "authorizeAndSendTestEmail" IN DROPDOWN AND CLICK "RUN" ▶️
+ * ==============================================================================
+ * Is function ko Apps Script editor mein 1 bar "Run" (▶️) karein.
+ * Google aap se "Authorization Required" maangay ga:
+ * Review Permissions -> Apna Google Account select karein -> Advanced -> Go to ... (unsafe) -> Allow.
+ * Is se foran aapke inbox mein test email aa jayegi aur email permission active ho jayegi!
+ */
+function authorizeAndSendTestEmail() {
+  var ss = getSpreadsheet();
+  var myEmail = Session.getActiveUser().getEmail() || ss.getOwner().getEmail() || "saimmalik4728@gmail.com";
+  MailApp.sendEmail({
+    to: myEmail,
+    subject: "CAIPSD Event System - Google Mail Activated Successfully!",
+    htmlBody: "<div style='font-family:Arial,sans-serif;padding:24px;border:1px solid #e2e8f0;border-left:6px solid #22c55e;border-radius:8px;max-width:520px;'>" +
+      "<h2 style='color:#1c304e;margin-top:0;'>✓ Google Mail Permission Granted!</h2>" +
+      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Aapka Google Account tickets aur QR passes send karne ke liye authorize ho chuka hai.</p>" +
+      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Ab aap CAIPSD portal par ja kar kisi bhi student ko 1-click se ticket email kar sakte hain.</p>" +
+      "<div style='margin-top:16px;padding:10px 14px;background:#f8fafc;border-radius:6px;font-size:12px;color:#64748b;'>CAIPSD Event Management — The Islamia University of Bahawalpur</div>" +
+      "</div>"
+  });
+  Logger.log("✓ Success! Test email sent to: " + myEmail);
+}
+
 function getSpreadsheet() {
   try {
     var active = SpreadsheetApp.getActiveSpreadsheet();
@@ -543,28 +568,41 @@ function doPost(e) {
         '</td></tr>' +
         '</table></td></tr></table></body></html>';
 
-      MailApp.sendEmail({
-        to: recipient,
-        subject: 'Your CAIPSD Event Pass - ' + ticketCode,
-        htmlBody: html
-      });
-
-      return respondJson({ status: 'ok', message: 'Ticket email delivered to ' + recipient });
+      try {
+        MailApp.sendEmail({
+          to: recipient,
+          subject: 'Your CAIPSD Event Pass - ' + ticketCode,
+          htmlBody: html
+        });
+        return respondJson({ status: 'ok', message: 'Ticket email delivered to ' + recipient });
+      } catch (err) {
+        return respondJson({
+          status: 'error',
+          message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
+        });
+      }
     }
 
     if (action === 'sendTestEmail') {
       var to = payload.to || (payload.ticket && payload.ticket.email) || ss.getOwner().getEmail();
-      MailApp.sendEmail({
-        to: to,
-        subject: 'CAIPSD Event System - Email Test',
-        htmlBody: '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
-          '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
-          '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
-          '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
-          '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
-          '</div>'
-      });
-      return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
+      try {
+        MailApp.sendEmail({
+          to: to,
+          subject: 'CAIPSD Event System - Email Test',
+          htmlBody: '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
+            '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
+            '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
+            '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
+            '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
+            '</div>'
+        });
+        return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
+      } catch (err) {
+        return respondJson({
+          status: 'error',
+          message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
+        });
+      }
     }
 
     return respondJson({ status: 'error', message: 'Unknown action: ' + action });
@@ -577,6 +615,28 @@ function doPost(e) {
 
 function doGet(e) {
   var action = (e && e.parameter && e.parameter.action) || 'ping';
+  if (action === 'sendTestEmail') {
+    var to = (e && e.parameter && e.parameter.to) || 'saimmalik4728@gmail.com';
+    try {
+      MailApp.sendEmail({
+        to: to,
+        subject: 'CAIPSD Event System - Email Test',
+        htmlBody: '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
+          '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
+          '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
+          '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
+          '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
+          '</div>'
+      });
+      return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
+    } catch (err) {
+      return respondJson({
+        status: 'error',
+        message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
+      });
+    }
+  }
+
   if (action === 'getAll') {
     var ss = getSpreadsheet();
     var sheet = ss.getSheetByName('CAIPSD_Tickets') || ss.getSheets()[0];
