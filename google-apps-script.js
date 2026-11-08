@@ -1,17 +1,42 @@
 /**
  * Google Apps Script for CAIPSD Event Management Portal
  * Spreadsheet: https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit
- * 
+ *
  * Instructions:
  * 1. Open your sheet: https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit
  * 2. Click Extensions > Apps Script
- * 3. Replace all editor code with this script and Save.
- * 4. Click Deploy > New deployment > Type: Web app
- * 5. Set "Execute as: Me" and "Who has access: Anyone"
- * 6. Click Deploy, Authorize access, and copy the Web App URL into your CAIPSD portal.
+ * 3. Replace all editor code with this script and Save (Ctrl+S).
+ * 4. Select "authorizeAndSendTestEmail" in the top dropdown, click Run, and Allow the permissions (one time only).
+ * 5. Click Deploy > Manage deployments > Edit (pencil) > Version: New version > Deploy.
+ *    (First time? Deploy > New deployment > Web app > Execute as: Me > Who has access: Anyone)
  */
 
 var TARGET_SPREADSHEET_ID = "12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o";
+
+/**
+ * Public page used for the "View ticket online" button inside the email.
+ * (The Node server can override this per email by sending its own APP_URL.)
+ */
+var VIEW_BASE_URL = "https://muhammadalisaim.github.io/caipsd-event-system/ticket.html";
+
+/**
+ * OPTIONAL but recommended when you use the Node.js server:
+ * put any long random text here AND the same text in .env as GOOGLE_WEBHOOK_SECRET.
+ * Then only your server can send emails / read tickets through this script.
+ * Leave it empty ("") if you use the GitHub Pages (static) version - the browser cannot keep a secret.
+ */
+var WEBHOOK_SECRET = "";
+
+function isAuthorized(secret) {
+  if (!WEBHOOK_SECRET) return true;
+  return String(secret || '') === WEBHOOK_SECRET;
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
 
 /**
  * ==============================================================================
@@ -49,16 +74,41 @@ function getSpreadsheet() {
   throw new Error("Spreadsheet could not be accessed.");
 }
 
-function handleSendTicketEmail(sheet, recipient, ticketCode, name) {
+function handleSendTicketEmail(sheet, recipient, ticketCode, name, opts) {
+  opts = opts || {};
   recipient = String(recipient || '').trim().toLowerCase();
-  if (!recipient || recipient.indexOf('@') === -1) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
     return respondJson({ status: 'error', message: 'Missing or invalid recipient email: ' + recipient });
   }
-  ticketCode = String(ticketCode || '').trim();
-  name = String(name || 'Participant').trim();
+  ticketCode = String(ticketCode || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{8,32}$/.test(ticketCode)) {
+    return respondJson({ status: 'error', message: 'Invalid ticket code.' });
+  }
+  name = String(name || 'Participant').trim().slice(0, 100);
 
-  var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=' + encodeURIComponent(ticketCode);
-  var viewLink = 'https://muhammadalisaim.github.io/caipsd-event-system/ticket.html?code=' + encodeURIComponent(ticketCode);
+  var viewLink = String(opts.viewLink || '').trim();
+  if (!/^https?:\/\//i.test(viewLink)) {
+    viewLink = VIEW_BASE_URL + '?code=' + encodeURIComponent(ticketCode);
+  }
+
+  // QR image: the server sends a ready PNG (best: shown inline, also attached as a file).
+  // Fallback for the static site: ask a public QR service for it.
+  var qrBlob = null;
+  if (opts.qrPngBase64) {
+    try {
+      qrBlob = Utilities.newBlob(Utilities.base64Decode(String(opts.qrPngBase64)), 'image/png', 'caipsd-ticket-' + ticketCode + '.png');
+    } catch (eBlob) { qrBlob = null; }
+  }
+  if (!qrBlob) {
+    try {
+      qrBlob = UrlFetchApp.fetch('https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=8&data=' + encodeURIComponent(ticketCode))
+        .getBlob().setName('caipsd-ticket-' + ticketCode + '.png');
+    } catch (eQr) { qrBlob = null; }
+  }
+
+  var safeName = escapeHtml(name);
+  var safeCode = escapeHtml(ticketCode);
+  var safeLink = escapeHtml(viewLink);
 
   var plainText = 'CAIPSD Event Admission Pass\n' +
     'The Islamia University of Bahawalpur\n\n' +
@@ -71,48 +121,50 @@ function handleSendTicketEmail(sheet, recipient, ticketCode, name) {
     'CAIPSD Event Management Team\n' +
     'The Islamia University of Bahawalpur';
 
+  var qrImgTag = qrBlob
+    ? '<img src="cid:ticketqr" width="220" height="220" alt="Ticket QR code" style="display:block;margin:0 auto;border-radius:8px">'
+    : '<div style="font-size:13px;color:#64748b">QR image unavailable. Use the button below to open your pass.</div>';
+
   var html = '<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial,Helvetica,sans-serif;color:#18243a">' +
     '<table width="100%" cellpadding="0" cellspacing="0" style="padding:28px 12px"><tr><td align="center">' +
-    '<table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e8ee;box-shadow:0 4px 16px rgba(0,0,0,0.06)">' +
-    '<tr><td style="background:linear-gradient(135deg, #1c304e 0%, #162740 100%);color:#ffffff;padding:26px 28px;border-bottom:3px solid #f59d14">' +
+    '<table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e8ee">' +
+    '<tr><td style="background:#1c304e;color:#ffffff;padding:26px 28px;border-bottom:3px solid #f59d14">' +
     '<div style="font-size:11px;letter-spacing:2px;color:#f59d14;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>' +
-    '<div style="font-size:22px;font-weight:800;margin-top:6px;letter-spacing:-0.5px">CAIPSD Event Ticket</div>' +
-    '<div style="font-size:13px;color:#94a3b8;margin-top:2px">Official Admission & QR Pass</div>' +
+    '<div style="font-size:22px;font-weight:800;margin-top:6px">CAIPSD Event Ticket</div>' +
+    '<div style="font-size:13px;color:#94a3b8;margin-top:2px">Official Admission &amp; QR Pass</div>' +
     '</td></tr>' +
     '<tr><td style="padding:26px 28px">' +
-    '<p style="margin:0 0 14px;font-size:15px">Hello <strong>' + name + '</strong>,</p>' +
+    '<p style="margin:0 0 14px;font-size:15px">Hello <strong>' + safeName + '</strong>,</p>' +
     '<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#4a566b">Your official admission pass is confirmed. Show the QR pass below at the entrance for camera verification.</p>' +
     '<div style="text-align:center;padding:20px;border:2px dashed #2b5fdc;background:#f8fafc;border-radius:12px">' +
-    '<img src="' + qrUrl + '" width="220" height="220" alt="Ticket QR code" style="display:block;margin:0 auto;border-radius:8px">' +
-    '<div style="margin-top:14px;font-family:Consolas,monospace;font-size:18px;letter-spacing:3px;font-weight:800;color:#1c304e">' + ticketCode + '</div>' +
+    qrImgTag +
+    '<div style="margin-top:14px;font-family:Consolas,monospace;font-size:18px;letter-spacing:3px;font-weight:800;color:#1c304e">' + safeCode + '</div>' +
     '<div style="margin-top:4px;font-size:12px;color:#64748b;font-weight:600">Scan at entrance for fast check-in</div>' +
     '</div>' +
-    '<p style="text-align:center;margin:24px 0 0"><a href="' + viewLink + '" style="background:#2b5fdc;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:13px;font-weight:700;display:inline-block">View Ticket Online & Download Pass</a></p>' +
+    '<p style="text-align:center;margin:24px 0 0"><a href="' + safeLink + '" style="background:#2b5fdc;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:13px;font-weight:700;display:inline-block">View Ticket Online &amp; Download Pass</a></p>' +
     '</td></tr>' +
     '<tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;text-align:center">' +
-    'This ticket is issued by CAIPSD, The Islamia University of Bahawalpur.' +
+    'This ticket is issued by CAIPSD, The Islamia University of Bahawalpur. Please do not share this QR pass with others.' +
     '</td></tr>' +
     '</table></td></tr></table></body></html>';
 
-  var mailSubject = 'Your CAIPSD Event Pass - ' + (ticketCode ? ticketCode : 'Admission Confirmed');
+  var mailSubject = 'Your CAIPSD Event Pass - ' + ticketCode;
+  var mailOptions = { htmlBody: html, name: 'CAIPSD Event Management' };
+  if (qrBlob) {
+    mailOptions.inlineImages = { ticketqr: qrBlob };
+    mailOptions.attachments = [qrBlob];
+  }
 
   try {
     try {
-      GmailApp.sendEmail(recipient, mailSubject, plainText, {
-        htmlBody: html,
-        name: 'CAIPSD Event Management'
-      });
+      GmailApp.sendEmail(recipient, mailSubject, plainText, mailOptions);
     } catch (eGmail) {
-      MailApp.sendEmail({
-        to: recipient,
-        subject: mailSubject,
-        body: plainText,
-        htmlBody: html,
-        name: 'CAIPSD Event Management'
-      });
+      var fallbackOptions = { to: recipient, subject: mailSubject, body: plainText, htmlBody: html, name: 'CAIPSD Event Management' };
+      if (qrBlob) { fallbackOptions.inlineImages = { ticketqr: qrBlob }; fallbackOptions.attachments = [qrBlob]; }
+      MailApp.sendEmail(fallbackOptions);
     }
 
-    if (ticketCode && sheet) {
+    if (sheet) {
       var rIdx = findRowByTicketCode(sheet, ticketCode);
       if (rIdx > 0) {
         sheet.getRange(rIdx, 11).setValue('sent');
@@ -123,7 +175,7 @@ function handleSendTicketEmail(sheet, recipient, ticketCode, name) {
   } catch (err) {
     var errMsg = err.message || err.toString();
     if (errMsg.indexOf('permission') !== -1 || errMsg.indexOf('MailApp') !== -1 || errMsg.indexOf('GmailApp') !== -1) {
-      errMsg = 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".';
+      errMsg = 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow". Then Deploy > Manage deployments > Edit > New version > Deploy.';
     }
     return respondJson({ status: 'error', message: errMsg });
   }
@@ -140,6 +192,9 @@ function doPost(e) {
 
   try {
     var payload = JSON.parse(e.postData.contents || '{}');
+    if (!isAuthorized(payload.secret)) {
+      return respondJson({ status: 'error', message: 'Unauthorized: wrong or missing webhook secret.' });
+    }
     var action = payload.action;
     var sheetName = payload.sheetName || 'Tickets';
     var ss = getSpreadsheet();
@@ -257,7 +312,7 @@ function doPost(e) {
       var recipient = String(payload.to || t.email || '').trim().toLowerCase();
       var ticketCode = String(payload.ticketCode || t.ticket_code || '').trim();
       var name = String(payload.fullName || t.full_name || 'Participant').trim();
-      return handleSendTicketEmail(sheet, recipient, ticketCode, name);
+      return handleSendTicketEmail(sheet, recipient, ticketCode, name, { qrPngBase64: payload.qrPngBase64, viewLink: payload.viewLink });
     }
 
     if (action === 'sendTestEmail') {
@@ -304,6 +359,9 @@ function doPost(e) {
 
 function doGet(e) {
   var action = (e && e.parameter && e.parameter.action) || 'ping';
+  if (action !== 'ping' && !isAuthorized(e && e.parameter && e.parameter.secret)) {
+    return respondJson({ status: 'error', message: 'Unauthorized: wrong or missing webhook secret.' });
+  }
 
   if (action === 'sendTicketEmail' || action === 'sendEmail') {
     var recipient = (e && e.parameter && (e.parameter.to || e.parameter.email)) || '';
@@ -311,7 +369,7 @@ function doGet(e) {
     var name = (e && e.parameter && (e.parameter.fullName || e.parameter.name)) || 'Participant';
     var ss = getSpreadsheet();
     var sheet = ss.getSheetByName('CAIPSD_Tickets') || ss.getSheets()[0];
-    return handleSendTicketEmail(sheet, recipient, ticketCode, name);
+    return handleSendTicketEmail(sheet, recipient, ticketCode, name, {});
   }
 
   if (action === 'sendTestEmail') {

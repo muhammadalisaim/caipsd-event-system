@@ -1,8 +1,12 @@
+const fs = require('fs');
+const path = require('path');
 const { getSetting, setSetting } = require('./db');
 
 const PERMANENT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbzodcplXRQvdPQlWLPeQbGOZdomvehyFGo4wG5K_9ugWSGuFKN-sRy6hfA6cq5AV-ds2Q/exec';
 const PERMANENT_SPREADSHEET_ID = '12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o';
 const PERMANENT_SHEET_NAME = 'CAIPSD_Tickets';
+
+const WEBHOOK_TIMEOUT_MS = Number(process.env.GOOGLE_WEBHOOK_TIMEOUT_MS || 30000);
 
 const SHEET_HEADERS = [
   'Ticket ID',
@@ -55,7 +59,7 @@ function saveSheetsConfig(data) {
     setSetting('google_sheets_auto_sync', data.autoSync ? '1' : '0');
   }
   if (data.sheetName !== undefined) {
-    setSetting('google_sheets_sheet_name', String(data.sheetName || '').trim() || DEFAULT_SHEET_NAME);
+    setSetting('google_sheets_sheet_name', String(data.sheetName || '').trim() || PERMANENT_SHEET_NAME);
   }
   if (data.spreadsheetId !== undefined) {
     const cleanedId = extractSpreadsheetId(data.spreadsheetId);
@@ -89,18 +93,29 @@ async function sendWebhook(action, payload = {}) {
     throw new Error('Google Sheets Webhook URL is not configured. Please deploy the Apps Script Web App.');
   }
 
-  const response = await fetch(config.webhookUrl, {
-    method: 'POST',
-    redirect: 'follow',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action,
-      sheetName: config.sheetName,
-      spreadsheetId: config.spreadsheetId,
-      timestamp: new Date().toISOString(),
-      ...payload
-    })
-  });
+  const secret = process.env.GOOGLE_WEBHOOK_SECRET || '';
+  let response;
+  try {
+    response = await fetch(config.webhookUrl, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+      body: JSON.stringify({
+        action,
+        sheetName: config.sheetName,
+        spreadsheetId: config.spreadsheetId,
+        timestamp: new Date().toISOString(),
+        ...(secret ? { secret } : {}),
+        ...payload
+      })
+    });
+  } catch (error) {
+    if (error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+      throw new Error('Google did not answer in time. Please try again in a moment.');
+    }
+    throw new Error(`Could not reach Google (${error.message}).`);
+  }
 
   const text = await response.text();
   let data;
@@ -110,6 +125,9 @@ async function sendWebhook(action, payload = {}) {
     data = { raw: text };
   }
 
+  if (data && data.raw !== undefined && /<html|<!doctype/i.test(String(data.raw))) {
+    throw new Error('Google returned a web page instead of data. Re-deploy the Apps Script as "Execute as: Me" and "Who has access: Anyone", then try again.');
+  }
   if (!response.ok || (data && data.status === 'error')) {
     const errorMsg = data && data.message ? data.message : `Webhook request failed (${response.status})`;
     throw new Error(errorMsg);
@@ -296,14 +314,16 @@ async function cancelTicket(ticketCode) {
   }
 }
 
-async function sendTicketEmailViaSheet(ticket) {
+async function sendTicketEmailViaSheet(ticket, { qrPngBase64, viewLink } = {}) {
   const config = getSheetsConfig();
   if (!config.webhookUrl) throw new Error('Google Web App URL is not configured.');
   return sendWebhook('sendTicketEmail', {
     ticket,
     to: ticket.email,
     ticketCode: ticket.ticket_code,
-    fullName: ticket.full_name
+    fullName: ticket.full_name,
+    ...(qrPngBase64 ? { qrPngBase64 } : {}),
+    ...(viewLink ? { viewLink } : {})
   });
 }
 
@@ -357,412 +377,14 @@ async function fetchTicketsFromSheet() {
   throw new Error('Google Sheets is not configured. Please provide a Spreadsheet ID or Webhook URL.');
 }
 
-function getAppsScriptTemplate(customSpreadsheetId) {
-  const targetId = customSpreadsheetId || getSheetsConfig().spreadsheetId || DEFAULT_SPREADSHEET_ID;
-  return `/**
- * Google Apps Script for CAIPSD Event Management Portal
- * Spreadsheet: https://docs.google.com/spreadsheets/d/${targetId}/edit
- * 
- * Instructions:
- * 1. Open your sheet: https://docs.google.com/spreadsheets/d/${targetId}/edit
- * 2. Click Extensions > Apps Script
- * 3. Replace all editor code with this script and Save.
- * 4. Click Deploy > New deployment > Type: Web app
- * 5. Set "Execute as: Me" and "Who has access: Anyone"
- * 6. Click Deploy, Authorize access, and copy the Web App URL into your CAIPSD portal.
- */
-
-var TARGET_SPREADSHEET_ID = "${targetId}";
-
 /**
- * ==============================================================================
- * STEP 1: SELECT "authorizeAndSendTestEmail" IN DROPDOWN AND CLICK "RUN" ▶️
- * ==============================================================================
- * Is function ko Apps Script editor mein 1 bar "Run" (▶️) karein.
- * Google aap se "Authorization Required" maangay ga:
- * Review Permissions -> Apna Google Account select karein -> Advanced -> Go to ... (unsafe) -> Allow.
- * Is se foran aapke inbox mein test email aa jayegi aur email permission active ho jayegi!
+ * The Apps Script lives in ONE file (google-apps-script.js) so the portal,
+ * the README and the "Copy Google Apps Script" button can never drift apart.
  */
-function authorizeAndSendTestEmail() {
-  var ss = getSpreadsheet();
-  var myEmail = Session.getActiveUser().getEmail() || ss.getOwner().getEmail() || "saimmalik4728@gmail.com";
-  MailApp.sendEmail({
-    to: myEmail,
-    subject: "CAIPSD Event System - Google Mail Activated Successfully!",
-    htmlBody: "<div style='font-family:Arial,sans-serif;padding:24px;border:1px solid #e2e8f0;border-left:6px solid #22c55e;border-radius:8px;max-width:520px;'>" +
-      "<h2 style='color:#1c304e;margin-top:0;'>✓ Google Mail Permission Granted!</h2>" +
-      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Aapka Google Account tickets aur QR passes send karne ke liye authorize ho chuka hai.</p>" +
-      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Ab aap CAIPSD portal par ja kar kisi bhi student ko 1-click se ticket email kar sakte hain.</p>" +
-      "<div style='margin-top:16px;padding:10px 14px;background:#f8fafc;border-radius:6px;font-size:12px;color:#64748b;'>CAIPSD Event Management — The Islamia University of Bahawalpur</div>" +
-      "</div>"
-  });
-  Logger.log("✓ Success! Test email sent to: " + myEmail);
-}
-
-function getSpreadsheet() {
-  try {
-    var active = SpreadsheetApp.getActiveSpreadsheet();
-    if (active) return active;
-  } catch (e) {}
-  if (TARGET_SPREADSHEET_ID) {
-    return SpreadsheetApp.openById(TARGET_SPREADSHEET_ID);
-  }
-  throw new Error("Spreadsheet could not be accessed.");
-}
-
-function handleSendTicketEmail(sheet, recipient, ticketCode, name) {
-  recipient = String(recipient || '').trim().toLowerCase();
-  if (!recipient || recipient.indexOf('@') === -1) {
-    return respondJson({ status: 'error', message: 'Missing or invalid recipient email: ' + recipient });
-  }
-  ticketCode = String(ticketCode || '').trim();
-  name = String(name || 'Participant').trim();
-
-  var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=' + encodeURIComponent(ticketCode);
-  var viewLink = 'https://muhammadalisaim.github.io/caipsd-event-system/ticket.html?code=' + encodeURIComponent(ticketCode);
-
-  var plainText = 'CAIPSD Event Admission Pass\n' +
-    'The Islamia University of Bahawalpur\n\n' +
-    'Hello ' + name + ',\n\n' +
-    'Your official admission pass for the CAIPSD Event is confirmed.\n\n' +
-    'Ticket ID: ' + ticketCode + '\n' +
-    'View and Download Pass: ' + viewLink + '\n\n' +
-    'Please show your QR code pass at the entrance for verification.\n\n' +
-    'Best regards,\n' +
-    'CAIPSD Event Management Team\n' +
-    'The Islamia University of Bahawalpur';
-
-  var html = '<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial,Helvetica,sans-serif;color:#18243a">' +
-    '<table width="100%" cellpadding="0" cellspacing="0" style="padding:28px 12px"><tr><td align="center">' +
-    '<table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e8ee;box-shadow:0 4px 16px rgba(0,0,0,0.06)">' +
-    '<tr><td style="background:linear-gradient(135deg, #1c304e 0%, #162740 100%);color:#ffffff;padding:26px 28px;border-bottom:3px solid #f59d14">' +
-    '<div style="font-size:11px;letter-spacing:2px;color:#f59d14;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>' +
-    '<div style="font-size:22px;font-weight:800;margin-top:6px;letter-spacing:-0.5px">CAIPSD Event Ticket</div>' +
-    '<div style="font-size:13px;color:#94a3b8;margin-top:2px">Official Admission & QR Pass</div>' +
-    '</td></tr>' +
-    '<tr><td style="padding:26px 28px">' +
-    '<p style="margin:0 0 14px;font-size:15px">Hello <strong>' + name + '</strong>,</p>' +
-    '<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#4a566b">Your official admission pass is confirmed. Show the QR pass below at the entrance for camera verification.</p>' +
-    '<div style="text-align:center;padding:20px;border:2px dashed #2b5fdc;background:#f8fafc;border-radius:12px">' +
-    '<img src="' + qrUrl + '" width="220" height="220" alt="Ticket QR code" style="display:block;margin:0 auto;border-radius:8px">' +
-    '<div style="margin-top:14px;font-family:Consolas,monospace;font-size:18px;letter-spacing:3px;font-weight:800;color:#1c304e">' + ticketCode + '</div>' +
-    '<div style="margin-top:4px;font-size:12px;color:#64748b;font-weight:600">Scan at entrance for fast check-in</div>' +
-    '</div>' +
-    '<p style="text-align:center;margin:24px 0 0"><a href="' + viewLink + '" style="background:#2b5fdc;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:13px;font-weight:700;display:inline-block">View Ticket Online & Download Pass</a></p>' +
-    '</td></tr>' +
-    '<tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;text-align:center">' +
-    'This ticket is issued by CAIPSD, The Islamia University of Bahawalpur.' +
-    '</td></tr>' +
-    '</table></td></tr></table></body></html>';
-
-  var mailSubject = 'Your CAIPSD Event Pass - ' + (ticketCode ? ticketCode : 'Admission Confirmed');
-
-  try {
-    try {
-      GmailApp.sendEmail(recipient, mailSubject, plainText, {
-        htmlBody: html,
-        name: 'CAIPSD Event Management'
-      });
-    } catch (eGmail) {
-      MailApp.sendEmail({
-        to: recipient,
-        subject: mailSubject,
-        body: plainText,
-        htmlBody: html,
-        name: 'CAIPSD Event Management'
-      });
-    }
-
-    if (ticketCode && sheet) {
-      var rIdx = findRowByTicketCode(sheet, ticketCode);
-      if (rIdx > 0) {
-        sheet.getRange(rIdx, 11).setValue('sent');
-      }
-    }
-
-    return respondJson({ status: 'ok', message: 'Ticket email delivered to ' + recipient });
-  } catch (err) {
-    var errMsg = err.message || err.toString();
-    if (errMsg.indexOf('permission') !== -1 || errMsg.indexOf('MailApp') !== -1 || errMsg.indexOf('GmailApp') !== -1) {
-      errMsg = 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".';
-    }
-    return respondJson({ status: 'error', message: errMsg });
-  }
-}
-
-function doPost(e) {
-  var lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Could not obtain lock' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  try {
-    var payload = JSON.parse(e.postData.contents || '{}');
-    var action = payload.action;
-    var sheetName = payload.sheetName || 'Tickets';
-    var ss = getSpreadsheet();
-    var sheet = ss.getSheetByName(sheetName);
-
-    if (!sheet) {
-      sheet = ss.insertSheet(sheetName);
-    }
-
-    if (action === 'ping') {
-      return respondJson({
-        status: 'ok',
-        message: 'Connection successful! Google Sheet is connected and ready.',
-        title: ss.getName(),
-        spreadsheetId: ss.getId()
-      });
-    }
-
-    if (action === 'syncAll') {
-      var headers = payload.headers || [
-        'Ticket ID', 'Full Name', 'Email', 'Phone', 'Issued At',
-        'Valid Until', 'Status', 'Entries', 'First Entry', 'Last Entry', 'Email Status'
-      ];
-      var rows = payload.rows || [];
-
-      sheet.clearContents();
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1c304e').setFontColor('#FFFFFF');
-      sheet.setFrozenRows(1);
-
-      if (rows.length > 0) {
-        sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-      }
-      return respondJson({ status: 'ok', message: 'Successfully synced ' + rows.length + ' tickets to Google Sheet.', count: rows.length });
-    }
-
-    if (action === 'appendTicket' || action === 'append') {
-      ensureHeaders(sheet, payload.headers);
-      var row = payload.row;
-      if (!row && payload.ticket) {
-        var t = payload.ticket;
-        row = ["'" + t.ticket_code, t.full_name || '', t.email || '', t.phone || '', t.issued_at || '', t.valid_until || '', t.status || 'valid', t.entry_count || 0, t.first_entry_at || '', t.last_entry_at || '', t.email_status || 'not_sent'];
-      }
-      if (row && row.length) {
-        var code = row[0];
-        var existingRowIndex = findRowByTicketCode(sheet, code);
-        if (existingRowIndex > 0) {
-          sheet.getRange(existingRowIndex, 1, 1, row.length).setValues([row]);
-        } else {
-          sheet.appendRow(row);
-        }
-      }
-      return respondJson({ status: 'ok', message: 'Ticket saved in Google Sheet.' });
-    }
-
-    if (action === 'updateTicket' || action === 'update') {
-      var ticketCode = payload.ticketCode || (payload.ticket && payload.ticket.ticket_code);
-      var updatedRow = payload.row;
-      if (!updatedRow && payload.ticket) {
-        var t = payload.ticket;
-        updatedRow = ["'" + t.ticket_code, t.full_name || '', t.email || '', t.phone || '', t.issued_at || '', t.valid_until || '', t.status || 'valid', t.entry_count || 0, t.first_entry_at || '', t.last_entry_at || '', t.email_status || 'not_sent'];
-      }
-      if (ticketCode && updatedRow) {
-        var rowIndex = findRowByTicketCode(sheet, ticketCode);
-        if (rowIndex > 0) {
-          sheet.getRange(rowIndex, 1, 1, updatedRow.length).setValues([updatedRow]);
-          return respondJson({ status: 'ok', message: 'Row updated.' });
-        } else {
-          sheet.appendRow(updatedRow);
-          return respondJson({ status: 'ok', message: 'Row appended.' });
-        }
-      }
-      return respondJson({ status: 'error', message: 'Missing ticketCode or row data' });
-    }
-
-    if (action === 'cancelTicket') {
-      var cancelCode = payload.ticketCode;
-      var rIdx = findRowByTicketCode(sheet, cancelCode);
-      if (rIdx > 0) {
-        sheet.getRange(rIdx, 7).setValue('Cancelled');
-        return respondJson({ status: 'ok', message: 'Ticket marked as Cancelled.' });
-      }
-      return respondJson({ status: 'ok', message: 'Ticket not found in sheet to cancel.' });
-    }
-
-    if (action === 'getAll') {
-      var data = sheet.getDataRange().getValues();
-      if (data.length <= 1) {
-        return respondJson({ status: 'ok', tickets: [] });
-      }
-      var headers = data[0];
-      var tickets = [];
-      for (var i = 1; i < data.length; i++) {
-        var r = data[i];
-        if (!r[0]) continue;
-        tickets.push({
-          ticket_code: String(r[0]).replace(/^'/, '').trim(),
-          full_name: String(r[1] || ''),
-          email: String(r[2] || ''),
-          phone: String(r[3] || ''),
-          issued_at: String(r[4] || ''),
-          valid_until: String(r[5] || ''),
-          status: String(r[6] || 'valid'),
-          entry_count: Number(r[7] || 0),
-          first_entry_at: String(r[8] || ''),
-          last_entry_at: String(r[9] || ''),
-          email_status: String(r[10] || 'not_sent')
-        });
-      }
-      return respondJson({ status: 'ok', tickets: tickets });
-    }
-
-    if (action === 'sendTicketEmail' || action === 'sendEmail') {
-      var t = payload.ticket || {};
-      var recipient = String(payload.to || t.email || '').trim().toLowerCase();
-      var ticketCode = String(payload.ticketCode || t.ticket_code || '').trim();
-      var name = String(payload.fullName || t.full_name || 'Participant').trim();
-      return handleSendTicketEmail(sheet, recipient, ticketCode, name);
-    }
-
-    if (action === 'sendTestEmail') {
-      var to = String(payload.to || (payload.ticket && payload.ticket.email) || '').trim().toLowerCase();
-      if (!to) {
-        try {
-          to = Session.getActiveUser().getEmail() || ss.getOwner().getEmail() || 'saimmalik4728@gmail.com';
-        } catch (eUser) {
-          to = 'saimmalik4728@gmail.com';
-        }
-      }
-      try {
-        var testSubject = 'CAIPSD Event System - Email Test';
-        var testBody = 'Google Account Connected!\n\nThis test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.\n\nYou can now send ticket QR passes to all students in 1 click.\n\nCAIPSD Events - The Islamia University of Bahawalpur';
-        var testHtml = '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
-          '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
-          '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
-          '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
-          '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
-          '</div>';
-
-        try {
-          GmailApp.sendEmail(to, testSubject, testBody, { htmlBody: testHtml, name: 'CAIPSD Event Management' });
-        } catch (eGTest) {
-          MailApp.sendEmail({ to: to, subject: testSubject, body: testBody, htmlBody: testHtml, name: 'CAIPSD Event Management' });
-        }
-        return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
-      } catch (err) {
-        var errTestMsg = err.message || err.toString();
-        if (errTestMsg.indexOf('permission') !== -1 || errTestMsg.indexOf('MailApp') !== -1 || errTestMsg.indexOf('GmailApp') !== -1) {
-          errTestMsg = 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".';
-        }
-        return respondJson({ status: 'error', message: errTestMsg });
-      }
-    }
-
-    return respondJson({ status: 'error', message: 'Unknown action: ' + action });
-  } catch (err) {
-    return respondJson({ status: 'error', message: err.toString() });
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function doGet(e) {
-  var action = (e && e.parameter && e.parameter.action) || 'ping';
-
-  if (action === 'sendTicketEmail' || action === 'sendEmail') {
-    var recipient = (e && e.parameter && (e.parameter.to || e.parameter.email)) || '';
-    var ticketCode = (e && e.parameter && (e.parameter.ticketCode || e.parameter.code)) || '';
-    var name = (e && e.parameter && (e.parameter.fullName || e.parameter.name)) || 'Participant';
-    var ss = getSpreadsheet();
-    var sheet = ss.getSheetByName('CAIPSD_Tickets') || ss.getSheets()[0];
-    return handleSendTicketEmail(sheet, recipient, ticketCode, name);
-  }
-
-  if (action === 'sendTestEmail') {
-    var to = (e && e.parameter && e.parameter.to) || 'saimmalik4728@gmail.com';
-    try {
-      var testSubject = 'CAIPSD Event System - Email Test';
-      var testBody = 'Google Account Connected!\n\nThis test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.\n\nYou can now send ticket QR passes to all students in 1 click.\n\nCAIPSD Events - The Islamia University of Bahawalpur';
-      var testHtml = '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
-        '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
-        '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
-        '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
-        '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
-        '</div>';
-
-      try {
-        GmailApp.sendEmail(to, testSubject, testBody, { htmlBody: testHtml, name: 'CAIPSD Event Management' });
-      } catch (eGTest) {
-        MailApp.sendEmail({ to: to, subject: testSubject, body: testBody, htmlBody: testHtml, name: 'CAIPSD Event Management' });
-      }
-      return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
-    } catch (err) {
-      return respondJson({
-        status: 'error',
-        message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
-      });
-    }
-  }
-
-  if (action === 'getAll') {
-    var ss = getSpreadsheet();
-    var sheet = ss.getSheetByName('CAIPSD_Tickets') || ss.getSheets()[0];
-    var data = sheet.getDataRange().getValues();
-    if (data.length <= 1) return respondJson({ status: 'ok', tickets: [] });
-    var tickets = [];
-    for (var i = 1; i < data.length; i++) {
-      var r = data[i];
-      if (!r[0]) continue;
-      tickets.push({
-        ticket_code: String(r[0]).replace(/^'/, '').trim(),
-        full_name: String(r[1] || ''),
-        email: String(r[2] || ''),
-        phone: String(r[3] || ''),
-        issued_at: String(r[4] || ''),
-        valid_until: String(r[5] || ''),
-        status: String(r[6] || 'valid'),
-        entry_count: Number(r[7] || 0),
-        first_entry_at: String(r[8] || ''),
-        last_entry_at: String(r[9] || ''),
-        email_status: String(r[10] || 'not_sent')
-      });
-    }
-    return respondJson({ status: 'ok', tickets: tickets });
-  }
-  return respondJson({
-    status: 'ok',
-    message: 'CAIPSD Google Sheets API is running.',
-    spreadsheetId: TARGET_SPREADSHEET_ID
-  });
-}
-
-function ensureHeaders(sheet, customHeaders) {
-  if (sheet.getLastRow() === 0) {
-    var headers = customHeaders || [
-      'Ticket ID', 'Full Name', 'Email', 'Phone', 'Issued At',
-      'Valid Until', 'Status', 'Entries', 'First Entry', 'Last Entry', 'Email Status'
-    ];
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1c304e').setFontColor('#FFFFFF');
-    sheet.setFrozenRows(1);
-  }
-}
-
-function findRowByTicketCode(sheet, code) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return -1;
-  var codes = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  var search = String(code).trim().toUpperCase();
-  for (var i = 0; i < codes.length; i++) {
-    if (String(codes[i][0]).trim().toUpperCase() === search) {
-      return i + 2;
-    }
-  }
-  return -1;
-}
-
-function respondJson(data) {
-  return ContentService.createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-`;
+function getAppsScriptTemplate(customSpreadsheetId) {
+  const targetId = customSpreadsheetId || getSheetsConfig().spreadsheetId || PERMANENT_SPREADSHEET_ID;
+  const source = fs.readFileSync(path.join(__dirname, 'google-apps-script.js'), 'utf8');
+  return source.split(PERMANENT_SPREADSHEET_ID).join(targetId);
 }
 
 module.exports = {

@@ -68,16 +68,19 @@ class SQLiteSessionStore extends session.Store {
 }
 
 app.disable('x-powered-by');
+// Cross-origin access is OFF by default (the portal and its API share one origin).
+// To let another website call this API, list it in ALLOWED_ORIGINS (comma separated).
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
 app.use((req, res, next) => {
-  if (req.headers.origin) {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
@@ -89,7 +92,7 @@ app.use(helmet({
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       imgSrc: ["'self'", 'data:', 'blob:'],
-      connectSrc: ["'self'", 'http://localhost:*', 'http://127.0.0.1:*', '*'],
+      connectSrc: ["'self'", 'https://script.google.com', 'https://script.googleusercontent.com', 'https://docs.google.com'],
       fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
       workerSrc: ["'self'", 'blob:'],
       objectSrc: ["'none'"],
@@ -112,6 +115,7 @@ app.get('/', (req, res) => res.redirect('/admin.html'));
 app.use(express.static(path.join(__dirname, 'public'), { maxAge: isProduction ? '1h' : 0, extensions: ['html'], index: false }));
 
 const ticketLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests. Please try again shortly.' } });
+const checkinLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many scans from this device. Please wait a moment.' } });
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts. Please try again later.' } });
 
 function requireAdmin(req, res, next) {
@@ -150,37 +154,79 @@ function getTicketById(id) { return db.prepare('SELECT * FROM tickets WHERE id =
 function getTicketByCode(code) { return db.prepare('SELECT * FROM tickets WHERE ticket_code = ?').get(code); }
 function qrOptions(width) { return { width, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#14213D', light: '#FFFFFF' } }; }
 
+/* ---- Email delivery -------------------------------------------------------
+   Two channels, tried in this order:
+   1. "smtp"          your Gmail / SMTP account (App Password)
+   2. "google-script" the attached Google Apps Script (sends from the Sheet owner's Gmail)
+   Tickets are emailed automatically when they are created; either channel is enough. */
+function emailChannel() {
+  if (mailConfigured()) return 'smtp';
+  if (getSheetsConfig().webhookUrl) return 'google-script';
+  return 'none';
+}
+function emailAvailable() { return emailChannel() !== 'none'; }
+function ticketViewLink(ticket) {
+  const base = String(process.env.APP_URL || '').trim().replace(/\/$/, '');
+  return base ? `${base}/ticket.html?code=${ticket.ticket_code}` : '';
+}
+function markEmailSent(ticket, channel) {
+  db.prepare("UPDATE tickets SET email_status='sent', emailed_at=?, email_error=NULL WHERE id=?").run(new Date().toISOString(), ticket.id);
+  return { status: 'sent', channel };
+}
+function markEmailFailed(ticket, message) {
+  const clean = cleanText(message, 400);
+  db.prepare("UPDATE tickets SET email_status='failed', email_error=? WHERE id=?").run(clean, ticket.id);
+  return { status: 'failed', error: clean };
+}
+
 async function emailTicket(ticket) {
-  let lastError = null;
+  let png;
+  try { png = await QRCode.toBuffer(ticket.ticket_code, qrOptions(320)); }
+  catch (error) { return markEmailFailed(ticket, `Could not create the QR code: ${error.message}`); }
+
+  const failures = [];
   if (mailConfigured()) {
     try {
-      const png = await QRCode.toBuffer(ticket.ticket_code, qrOptions(320));
       await sendTicketEmail(ticket, png);
-      db.prepare("UPDATE tickets SET email_status='sent', emailed_at=?, email_error=NULL WHERE id=?").run(new Date().toISOString(), ticket.id);
-      return { status: 'sent' };
+      return markEmailSent(ticket, 'smtp');
     } catch (error) {
-      console.warn('SMTP ticket email failed, attempting Google Web App fallback:', error.message);
-      lastError = error;
+      console.warn('SMTP ticket email failed:', error.message);
+      failures.push(`Gmail/SMTP: ${error.message}`);
     }
   }
-
-  // Fallback to attached Google Web App
-  try {
-    const config = getSheetsConfig();
-    if (config.webhookUrl) {
-      await sendTicketEmailViaSheet(ticket);
-      db.prepare("UPDATE tickets SET email_status='sent', emailed_at=?, email_error=NULL WHERE id=?").run(new Date().toISOString(), ticket.id);
-      return { status: 'sent' };
+  if (getSheetsConfig().webhookUrl) {
+    try {
+      await sendTicketEmailViaSheet(ticket, { qrPngBase64: png.toString('base64'), viewLink: ticketViewLink(ticket) });
+      return markEmailSent(ticket, 'google-script');
+    } catch (error) {
+      console.warn('Google Script ticket email failed:', error.message);
+      failures.push(`Google Script: ${error.message}`);
     }
-  } catch (error) {
-    console.error('Google Web App ticket email fallback failed:', error.message);
-    if (!lastError) lastError = error;
   }
-
-  const message = cleanText(lastError ? lastError.message : 'Email is not configured', 300);
-  db.prepare("UPDATE tickets SET email_status='failed', email_error=? WHERE id=?").run(message, ticket.id);
-  return { status: 'failed', error: message };
+  if (!failures.length) failures.push('Email is not configured.');
+  return markEmailFailed(ticket, failures.join(' | '));
 }
+
+// Tickets that are not in this database yet (issued from the Google Sheet) are looked up there.
+// A short cache stops a flood of wrong codes from hammering Google.
+const SHEET_CACHE_MS = 15000;
+let sheetTicketCache = { at: 0, tickets: [] };
+async function getSheetTicketsCached() {
+  if (Date.now() - sheetTicketCache.at < SHEET_CACHE_MS) return sheetTicketCache.tickets;
+  try {
+    const tickets = await fetchTicketsFromSheet();
+    sheetTicketCache = { at: Date.now(), tickets };
+    return tickets;
+  } catch (error) {
+    sheetTicketCache = { at: Date.now(), tickets: [] };
+    throw error;
+  }
+}
+function isoOr(value, fallback) {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? new Date(time).toISOString() : fallback;
+}
+function sheetTicketCancelled(row) { return /cancel/i.test(String((row && row.status) || '')); }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'CAIPSD Event Management' }));
 
@@ -225,7 +271,9 @@ app.get('/api/admin/config', requireAdmin, (req, res) => {
   res.json({
     validDays: TICKET_VALID_DAYS,
     mail: {
-      configured: mailConfigured(),
+      configured: emailAvailable(),
+      channel: emailChannel(),
+      smtpConfigured: mailConfigured(),
       from: mailConfigured() ? fromAddress() : null,
       user: mailCfg.user || null,
       fromName: mailCfg.fromName,
@@ -284,8 +332,7 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
     let ticket = getTicketById(Number(result.lastInsertRowid));
 
     const wantsEmail = req.body.sendEmail !== false && req.body.sendEmail !== 'false';
-    const emailConfigured = mailConfigured() || Boolean(getSheetsConfig().webhookUrl);
-    const emailResult = wantsEmail && emailConfigured ? await emailTicket(ticket) : { status: 'not_sent', skipped: wantsEmail ? 'not_configured' : 'declined' };
+    const emailResult = wantsEmail && emailAvailable() ? await emailTicket(ticket) : { status: 'not_sent', skipped: wantsEmail ? 'not_configured' : 'declined' };
     ticket = getTicketById(ticket.id);
 
     // Auto-sync ticket to Google Sheet in background
@@ -300,7 +347,7 @@ app.post('/api/admin/tickets/:id/send', requireAdmin, async (req, res, next) => 
     const id = Number(req.params.id);
     const ticket = Number.isInteger(id) ? getTicketById(id) : null;
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
-    if (!mailConfigured() && !getSheetsConfig().webhookUrl) return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
+    if (!emailAvailable()) return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
     const result = await emailTicket(ticket);
     const updated = serializeTicket(getTicketById(id));
     sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
@@ -311,7 +358,7 @@ app.post('/api/admin/tickets/:id/send', requireAdmin, async (req, res, next) => 
 
 app.post('/api/admin/tickets/email-all', requireAdmin, async (req, res, next) => {
   try {
-    if (!mailConfigured() && !getSheetsConfig().webhookUrl) {
+    if (!emailAvailable()) {
       return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
     }
     const mode = req.body && req.body.mode === 'all' ? 'all' : 'pending';
@@ -382,11 +429,14 @@ async function handleCheckinRequest(req, res, next) {
     let ticket = getTicketByCode(match[0]);
     if (!ticket) {
       try {
-        const sheetTickets = await fetchTicketsFromSheet();
+        const sheetTickets = await getSheetTicketsCached();
         const found = sheetTickets.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === match[0]);
+        if (found && sheetTicketCancelled(found)) {
+          return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
+        }
         if (found) {
-          const issued = found.issued_at || new Date().toISOString();
-          const validUntil = found.valid_until || new Date(Date.now() + TICKET_VALID_DAYS * 86400000).toISOString();
+          const issued = isoOr(found.issued_at, new Date().toISOString());
+          const validUntil = isoOr(found.valid_until, new Date(Date.now() + TICKET_VALID_DAYS * 86400000).toISOString());
           db.prepare(`INSERT OR IGNORE INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
             found.full_name || 'Participant',
             found.email || `attendee-${match[0].toLowerCase()}@caipsd.org`,
@@ -401,7 +451,7 @@ async function handleCheckinRequest(req, res, next) {
           );
           ticket = getTicketByCode(match[0]);
         }
-      } catch (err) {}
+      } catch (err) { console.warn('Sheet lookup during check-in failed:', err.message); }
     }
     if (!ticket) return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
     const now = new Date();
@@ -420,7 +470,7 @@ async function handleCheckinRequest(req, res, next) {
   } catch (error) { next(error); }
 }
 
-app.post('/api/check-in', handleCheckinRequest);
+app.post('/api/check-in', checkinLimiter, handleCheckinRequest);
 app.post('/api/admin/check-in', requireAdmin, handleCheckinRequest);
 
 app.get('/api/admin/sheets/config', requireAdmin, (req, res) => {
@@ -461,6 +511,7 @@ app.post('/api/admin/sheets/pull', requireAdmin, async (req, res) => {
     db.transaction(() => {
       for (const t of sheetTickets) {
         if (!t.ticket_code) continue;
+        if (sheetTicketCancelled(t)) continue;
         const code = cleanText(t.ticket_code).toUpperCase();
         const existing = getTicketByCode(code);
         if (existing) {
@@ -472,8 +523,8 @@ app.post('/api/admin/sheets/pull', requireAdmin, async (req, res) => {
           if (!validEmail(email)) continue;
           const emailExists = db.prepare('SELECT id FROM tickets WHERE email = ?').get(email);
           if (emailExists) continue;
-          const issued = t.issued_at || new Date().toISOString();
-          const valid = t.valid_until || new Date(Date.now() + TICKET_VALID_DAYS * 86400000).toISOString();
+          const issued = isoOr(t.issued_at, new Date().toISOString());
+          const valid = isoOr(t.valid_until, new Date(Date.now() + TICKET_VALID_DAYS * 86400000).toISOString());
           db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, email_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
             .run(cleanText(t.full_name) || 'Guest', email, cleanText(t.phone) || '-', code, issued, valid, Number(t.entry_count || 0), cleanText(t.email_status) || 'not_sent');
           imported++;

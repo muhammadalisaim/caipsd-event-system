@@ -2,6 +2,8 @@ const nodemailer = require('nodemailer');
 const { getSetting, setSetting } = require('./db');
 
 const TIMEZONE = process.env.EVENT_TIMEZONE || 'Asia/Karachi';
+// Never let a slow mail server freeze ticket creation.
+const TIMEOUTS = { connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000 };
 
 function getMailConfig() {
   const user = getSetting('smtp_user') || process.env.SMTP_USER || '';
@@ -31,21 +33,23 @@ function createTransport() {
   if (!cfg.host || cfg.host.includes('gmail')) {
     return nodemailer.createTransport({
       service: 'gmail',
-      auth: { user: cfg.user, pass: cfg.pass }
+      auth: { user: cfg.user, pass: cfg.pass },
+      ...TIMEOUTS
     });
   }
   return nodemailer.createTransport({
     host: cfg.host,
     port: cfg.port,
     secure: cfg.secure,
-    auth: { user: cfg.user, pass: cfg.pass }
+    auth: { user: cfg.user, pass: cfg.pass },
+    ...TIMEOUTS
   });
 }
 
 async function verifyMailConfig(user, pass, host, port) {
   const transport = !host || host.includes('gmail')
-    ? nodemailer.createTransport({ service: 'gmail', auth: { user, pass } })
-    : nodemailer.createTransport({ host, port: Number(port || 587), auth: { user, pass } });
+    ? nodemailer.createTransport({ service: 'gmail', auth: { user, pass }, ...TIMEOUTS })
+    : nodemailer.createTransport({ host, port: Number(port || 587), secure: Number(port) === 465, auth: { user, pass }, ...TIMEOUTS });
   await transport.verify();
   return true;
 }
