@@ -18,9 +18,10 @@ function dateTimeLabel(value) {
 function pill(kind, label) { return `<span class="status-pill status-${kind}">${escapeHtml(label)}</span>`; }
 function ticketPill(ticket) {
   if (ticket.status === 'expired') return pill('closed', 'Expired');
-  if (ticket.entry_count >= 2) return pill('open', 'Day 1 & Day 2 (2/2)');
-  if (ticket.entry_count === 1) return pill('checked_in', 'Day 1 Entered (1/2)');
-  return pill('draft', 'Not Entered (0/2)');
+  const maxDays = Number(ticket.max_days) || 2;
+  if (ticket.entry_count >= maxDays) return pill('open', `Completed (${ticket.entry_count}/${maxDays})`);
+  if (ticket.entry_count > 0) return pill('checked_in', `Day ${ticket.entry_count} Entered (${ticket.entry_count}/${maxDays})`);
+  return pill('draft', `Not Entered (0/${maxDays})`);
 }
 function toast(message, type = 'success') {
   const node = document.createElement('div');
@@ -764,7 +765,12 @@ $('#admin-year').textContent = new Date().getFullYear();
 
 async function loadConfig() {
   try { appConfig = await api('/api/admin/config'); } catch (error) { console.error(error); }
-  if ($('#valid-days')) $('#valid-days').textContent = appConfig.validDays || 3;
+  const days = Number(appConfig.validDays) || 2;
+  if ($('#valid-days')) $('#valid-days').textContent = days;
+  if ($('#topbar-days-label')) $('#topbar-days-label').textContent = `${days} Day${days === 1 ? '' : 's'}`;
+  if ($('#setting-duration-select')) $('#setting-duration-select').value = String(days);
+  if ($('#ticket-days-select')) $('#ticket-days-select').value = String(days);
+  if ($('#bulk-days-select')) $('#bulk-days-select').value = String(days);
   const configured = Boolean(appConfig.mail && appConfig.mail.configured);
   if ($('#send-email-checkbox')) {
     $('#send-email-checkbox').checked = configured;
@@ -923,6 +929,7 @@ const ticketModal = $('#ticket-modal');
 function openTicketModal() {
   lastFocused = document.activeElement;
   const form = $('#ticket-form'); form.reset();
+  if ($('#ticket-days-select')) $('#ticket-days-select').value = String(appConfig.validDays || 2);
   $('#ticket-form-error').textContent = '';
   ticketModal.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -941,6 +948,7 @@ const bulkModal = $('#bulk-modal');
 function openBulkModal() {
   lastFocused = document.activeElement;
   if ($('#bulk-names-input')) $('#bulk-names-input').value = '';
+  if ($('#bulk-days-select')) $('#bulk-days-select').value = String(appConfig.validDays || 2);
   if ($('#bulk-form-error')) $('#bulk-form-error').textContent = '';
   if (bulkModal) bulkModal.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -957,6 +965,59 @@ bulkModal?.addEventListener('click', (event) => { if (event.target === bulkModal
 $('#quick-bulk-tickets')?.addEventListener('click', openBulkModal);
 $('#btn-bulk-tickets')?.addEventListener('click', openBulkModal);
 $('#overview-bulk-btn')?.addEventListener('click', openBulkModal);
+
+/* ---- Event Duration Modal ---- */
+const durationModal = $('#duration-modal');
+function openDurationModal() {
+  lastFocused = document.activeElement;
+  if ($('#setting-duration-select')) $('#setting-duration-select').value = String(appConfig.validDays || 2);
+  if ($('#duration-form-msg')) $('#duration-form-msg').style.display = 'none';
+  if (durationModal) durationModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+function closeDurationModal() {
+  if (durationModal) durationModal.hidden = true;
+  document.body.style.overflow = '';
+  if (lastFocused && lastFocused.focus) lastFocused.focus();
+}
+$('#topbar-duration-btn')?.addEventListener('click', openDurationModal);
+$('#close-duration-modal')?.addEventListener('click', closeDurationModal);
+$('#cancel-duration-modal')?.addEventListener('click', closeDurationModal);
+durationModal?.addEventListener('click', (event) => { if (event.target === durationModal) closeDurationModal(); });
+
+$('#duration-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const select = $('#setting-duration-select');
+  const days = Number(select?.value) || 2;
+  const btn = $('#save-duration-btn');
+  const msg = $('#duration-form-msg');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  if (msg) msg.style.display = 'none';
+
+  try {
+    const res = await api('/api/admin/settings/duration', {
+      method: 'POST',
+      body: JSON.stringify({ validDays: days })
+    });
+    appConfig.validDays = res.validDays || days;
+    if ($('#topbar-days-label')) $('#topbar-days-label').textContent = `${appConfig.validDays} Day${appConfig.validDays === 1 ? '' : 's'}`;
+    if ($('#valid-days')) $('#valid-days').textContent = appConfig.validDays;
+    if ($('#ticket-days-select')) $('#ticket-days-select').value = String(appConfig.validDays);
+    if ($('#bulk-days-select')) $('#bulk-days-select').value = String(appConfig.validDays);
+    closeDurationModal();
+    toast(`✓ Event duration updated to ${appConfig.validDays} days.`);
+  } catch (err) {
+    if (msg) {
+      msg.textContent = err.message || 'Failed to save duration';
+      msg.style.display = 'block';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = 'Save Duration <span>→</span>';
+    }
+  }
+});
 
 /* ---- Google Mail Modal ---- */
 const mailModal = $('#mail-modal');
@@ -1213,10 +1274,12 @@ $('#email-all-form')?.addEventListener('submit', async (event) => {
 
 /* Modal keyboard accessibility */
 document.addEventListener('keydown', (event) => {
-  const activeModal = [ticketModal, mailModal, emailAllModal].find((m) => m && !m.hidden);
+  const activeModal = [ticketModal, bulkModal, durationModal, mailModal, emailAllModal].find((m) => m && !m.hidden);
   if (!activeModal) return;
   if (event.key === 'Escape') {
     if (activeModal === ticketModal) closeTicketModal();
+    else if (activeModal === bulkModal) closeBulkModal();
+    else if (activeModal === durationModal) closeDurationModal();
     else if (activeModal === mailModal) closeMailModal();
     else if (activeModal === emailAllModal) closeEmailAllModal();
     return;
@@ -1234,7 +1297,8 @@ $('#ticket-form')?.addEventListener('submit', async (event) => {
   const payload = {
     fullName: form.elements.fullName.value,
     phone: form.elements.phone ? form.elements.phone.value : '',
-    email: form.elements.email ? form.elements.email.value : ''
+    email: form.elements.email ? form.elements.email.value : '',
+    days: form.elements.days ? Number(form.elements.days.value) : (appConfig.validDays || 2)
   };
   const button = $('#save-ticket');
   button.disabled = true;
@@ -1255,12 +1319,13 @@ $('#bulk-form')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const text = $('#bulk-names-input').value.trim();
   if (!text) return;
+  const days = $('#bulk-days-select') ? Number($('#bulk-days-select').value) : (appConfig.validDays || 2);
   const button = $('#save-bulk-btn');
   button.disabled = true;
   button.textContent = 'Generating tickets…';
   $('#bulk-form-error').textContent = '';
   try {
-    const data = await api('/api/admin/tickets/bulk', { method: 'POST', body: JSON.stringify({ names: text }) });
+    const data = await api('/api/admin/tickets/bulk', { method: 'POST', body: JSON.stringify({ names: text, days }) });
     closeBulkModal();
     toast(`✓ ${data.message}`);
     refreshStats();
@@ -1293,7 +1358,9 @@ async function performCheckin(ticketCode) {
   note.className = 'scanner-message';
   try {
     const result = await api('/api/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
-    const visitInfo = result.dayNumber === 2 ? 'Day 2 Entry · Final Day Recorded' : 'Day 1 Entry Recorded';
+    const maxDays = Number(result.maxDays) || 2;
+    const isFinal = result.dayNumber >= maxDays;
+    const visitInfo = `Day ${result.dayNumber} of ${maxDays} Entry Recorded${isFinal ? ' · Final Day' : ''}`;
     showCheckinResult(result.repeat ? 'warning' : 'success', result.message, result.ticket, visitInfo);
     note.textContent = result.message; note.className = 'scanner-message success';
     $('#ticket-code-input').value = '';

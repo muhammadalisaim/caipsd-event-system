@@ -175,6 +175,7 @@
         <div class="breadcrumb">CAIPSD <span>/</span> <strong id="breadcrumb-current">Overview</strong></div>
         <div class="topbar-right">
           <button id="topbar-gate-btn" class="topbar-status topbar-btn" style="cursor: pointer; border: 1px solid rgba(43,95,220,0.15); background: #ffffff; color: inherit; padding: 0.3rem 0.75rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem; font-family: inherit;" title="Switch to Entrance Gate Check-in"><i style="background: #22c55e;"></i> <span>Gate Check-in</span></button>
+          <button id="topbar-duration-btn" class="topbar-status topbar-btn" style="cursor: pointer; border: 1px solid rgba(43,95,220,0.25); background: #ffffff; color: #1c304e; padding: 0.3rem 0.75rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem; font-family: inherit;" title="Change Event Duration (2, 3, 4 days)"><i style="background: #2b5fdc;"></i> <span>Event: <strong id="topbar-days-label">2 Days</strong> ⚙</span></button>
           <a href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener" class="topbar-status" style="text-decoration: none; color: inherit; background: rgba(43,95,220,0.08); padding: 0.3rem 0.7rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem;" title="Open permanent Google Sheet"><i style="background: #22c55e;"></i> Google Sheet Live ↗</a>
           <span class="topbar-status"><i></i> System active</span>
           <div class="admin-avatar" id="admin-avatar"><img src="assets/caipsd-mark.png" alt="Admin" class="avatar-img" /></div>
@@ -244,11 +245,19 @@
           <input name="fullName" maxlength="100" required autocomplete="off" placeholder="e.g. Muhammad Ali Saim">
         </label>
         <div class="admin-form-grid">
-          <label>Phone / Roll No (Optional)
-            <input name="phone" maxlength="30" autocomplete="off" placeholder="Optional phone or roll number">
+          <label>Event Duration / Days
+            <select name="days" id="ticket-days-select" style="width: 100%; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 9px 10px; font-family: inherit; font-size: 0.9rem; background: #fff;">
+              <option value="1">1 Day Pass (1 Scan allowed)</option>
+              <option value="2" selected>2 Days Pass (1 Scan/Day · 2 Scans max)</option>
+              <option value="3">3 Days Pass (1 Scan/Day · 3 Scans max)</option>
+              <option value="4">4 Days Pass (1 Scan/Day · 4 Scans max)</option>
+              <option value="5">5 Days Pass (1 Scan/Day · 5 Scans max)</option>
+              <option value="6">6 Days Pass (1 Scan/Day · 6 Scans max)</option>
+              <option value="7">7 Days Pass (1 Scan/Day · 7 Scans max)</option>
+            </select>
           </label>
-          <label>Email Address (Optional)
-            <input name="email" type="email" maxlength="180" autocomplete="off" placeholder="Optional email address">
+          <label>Phone / Roll No (Optional)
+            <input name="phone" maxlength="30" autocomplete="off" placeholder="Optional roll number or phone">
           </label>
         </div>
         <div id="ticket-form-error" class="inline-error" role="alert"></div>
@@ -268,6 +277,17 @@
       <p class="modal-subcopy">Paste participant names below (one name per line). Unique QR tickets will be generated instantly for all of them.</p>
 
       <form id="bulk-form" class="admin-form">
+        <label>Event Duration / Ticket Validity (Days)
+          <select id="bulk-days-select" name="days" style="width: 100%; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 9px 10px; font-family: inherit; font-size: 0.9rem; background: #fff; margin-bottom: 0.75rem;">
+            <option value="1">1 Day Pass (1 Scan allowed)</option>
+            <option value="2" selected>2 Days Pass (1 Scan/Day · 2 Scans max)</option>
+            <option value="3">3 Days Pass (1 Scan/Day · 3 Scans max)</option>
+            <option value="4">4 Days Pass (1 Scan/Day · 4 Scans max)</option>
+            <option value="5">5 Days Pass (1 Scan/Day · 5 Scans max)</option>
+            <option value="6">6 Days Pass (1 Scan/Day · 6 Scans max)</option>
+            <option value="7">7 Days Pass (1 Scan/Day · 7 Scans max)</option>
+          </select>
+        </label>
         <label>Student Names (One per line) *
           <textarea id="bulk-names-input" rows="8" style="width: 100%; box-sizing: border-box; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px; font-family: inherit; font-size: 0.9rem; resize: vertical;" placeholder="Ali Ahmad&#10;Fatima Khan&#10;Usman Tariq&#10;Zainab Bibi" required></textarea>
         </label>
@@ -275,6 +295,34 @@
         <div class="modal-actions">
           <button type="button" class="admin-button admin-button-light" id="cancel-bulk-modal">Cancel</button>
           <button type="submit" class="admin-button admin-button-primary" id="save-bulk-btn">Generate All Tickets <span>→</span></button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div id="duration-modal" class="admin-modal-backdrop" hidden>
+    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="duration-modal-title" style="max-width: 450px;">
+      <button class="admin-modal-close" id="close-duration-modal" aria-label="Close">×</button>
+      <div class="admin-kicker">EVENT SETTINGS</div>
+      <h2 id="duration-modal-title">Event <em>duration.</em></h2>
+      <p class="modal-subcopy">Set the event duration (e.g. 2, 3, or 4 days). Each day allows 1 gate entry scan per ticket.</p>
+
+      <form id="duration-form" class="admin-form">
+        <label>Default Event Days
+          <select id="setting-duration-select" style="width: 100%; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: 0.95rem; font-weight: 600; background: #fff;">
+            <option value="1">1 Day (1 entry total)</option>
+            <option value="2">2 Days (1 entry per day · 2 entries total)</option>
+            <option value="3">3 Days (1 entry per day · 3 entries total)</option>
+            <option value="4">4 Days (1 entry per day · 4 entries total)</option>
+            <option value="5">5 Days (1 entry per day · 5 entries total)</option>
+            <option value="6">6 Days (1 entry per day · 6 entries total)</option>
+            <option value="7">7 Days (1 entry per day · 7 entries total)</option>
+          </select>
+        </label>
+        <div id="duration-form-msg" class="inline-error" style="display:none;" role="status"></div>
+        <div class="modal-actions">
+          <button type="button" class="admin-button admin-button-light" id="cancel-duration-modal">Cancel</button>
+          <button type="submit" class="admin-button admin-button-primary" id="save-duration-btn">Save Duration <span>→</span></button>
         </div>
       </form>
     </section>

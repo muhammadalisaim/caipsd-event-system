@@ -41,6 +41,7 @@ db.exec(`
     issued_at TEXT NOT NULL,
     valid_until TEXT NOT NULL,
     entry_count INTEGER NOT NULL DEFAULT 0,
+    max_days INTEGER NOT NULL DEFAULT 2,
     first_entry_at TEXT,
     last_entry_at TEXT,
     email_status TEXT NOT NULL DEFAULT 'not_sent',
@@ -71,6 +72,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_entries_ticket ON entries(ticket_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
 `);
+
+// Migration: add max_days column if missing
+try {
+  db.exec("ALTER TABLE tickets ADD COLUMN max_days INTEGER NOT NULL DEFAULT 2");
+} catch {}
 
 // Migration: remove unique constraint on email if present in existing table
 try {

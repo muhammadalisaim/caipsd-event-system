@@ -4,7 +4,7 @@ process.env.SESSION_SECRET = 'test-secret-test-secret-test-secret';
 process.env.ADMIN_EMAIL = 'admin@test.org';
 process.env.ADMIN_PASSWORD = 'TestPassword123!';
 process.env.SMTP_JSON = '1'; // capture emails in-memory instead of sending
-process.env.TICKET_VALID_DAYS = '3';
+process.env.TICKET_VALID_DAYS = '2';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -218,4 +218,66 @@ test('Google mail config and 1-click email-all endpoints', async () => {
   assert.equal(emailAllRes.status, 200);
   assert.equal(typeof emailAllRes.data.sent, 'number');
   assert.equal(typeof emailAllRes.data.total, 'number');
+});
+
+test('configurable duration (2, 3, 4 days) and check-in limits', async () => {
+  // Test getting and updating default duration
+  const getDur = await call('/api/admin/settings/duration');
+  assert.equal(getDur.status, 200);
+  assert.equal(typeof getDur.data.validDays, 'number');
+
+  const setDur = await call('/api/admin/settings/duration', {
+    method: 'POST',
+    body: { validDays: 4 }
+  });
+  assert.equal(setDur.status, 200);
+  assert.equal(setDur.data.validDays, 4);
+
+  // Issue ticket using the new default (4 days)
+  const t4Res = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Hamza Tariq' }
+  });
+  assert.equal(t4Res.status, 201);
+  const t4 = t4Res.data.ticket;
+  assert.equal(t4.max_days, 4);
+
+  // Issue ticket explicitly overriding to 3 days
+  const t3Res = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Zainab Bibi', days: 3 }
+  });
+  assert.equal(t3Res.status, 201);
+  const t3 = t3Res.data.ticket;
+  assert.equal(t3.max_days, 3);
+
+  // Verify 3-day ticket allows Day 1, Day 2, Day 3 and blocks Day 4
+  // Day 1
+  const d1 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });
+  assert.equal(d1.status, 200);
+  assert.equal(d1.data.dayNumber, 1);
+  assert.equal(d1.data.maxDays, 3);
+
+  // Simulate Day 2
+  db.prepare('UPDATE entries SET scanned_at = ? WHERE ticket_id = ?').run(new Date(Date.now() - 86400000 * 2).toISOString(), t3.id);
+  const d2 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });
+  assert.equal(d2.status, 200);
+  assert.equal(d2.data.dayNumber, 2);
+
+  // Simulate Day 3
+  db.prepare('UPDATE entries SET scanned_at = ? WHERE id = (SELECT id FROM entries WHERE ticket_id = ? ORDER BY id DESC LIMIT 1)').run(new Date(Date.now() - 86400000).toISOString(), t3.id);
+  const d3 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });
+  assert.equal(d3.status, 200);
+  assert.equal(d3.data.dayNumber, 3);
+  assert.ok(d3.data.message.includes('Final Day'));
+
+  // Day 4 attempt -> blocked because max_days is 3
+  db.prepare('UPDATE entries SET scanned_at = ? WHERE id = (SELECT id FROM entries WHERE ticket_id = ? ORDER BY id DESC LIMIT 1)').run(new Date(Date.now() - 40000000).toISOString(), t3.id);
+  const d4 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });
+  assert.equal(d4.status, 409);
+  assert.ok(d4.data.limitReached);
+  assert.equal(d4.data.maxDays, 3);
+
+  // Reset duration back to 2 days
+  await call('/api/admin/settings/duration', { method: 'POST', body: { validDays: 2 } });
 });

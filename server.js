@@ -37,7 +37,13 @@ if (isProduction && (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD =
   throw new Error('Set a strong, unique ADMIN_PASSWORD in your production environment.');
 }
 initializeAdmin(process.env.ADMIN_EMAIL || 'admin@caipsd.org', process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD);
-const TICKET_VALID_DAYS = Math.max(1, Number(process.env.TICKET_VALID_DAYS || 3));
+const TICKET_VALID_DAYS = Math.max(1, Number(process.env.TICKET_VALID_DAYS || 2));
+
+function getDefaultValidDays() {
+  const saved = getSetting('ticket_valid_days');
+  if (saved && !Number.isNaN(Number(saved))) return Math.max(1, Math.min(30, Number(saved)));
+  return TICKET_VALID_DAYS;
+}
 
 class SQLiteSessionStore extends session.Store {
   get(sid, callback) {
@@ -151,8 +157,9 @@ const cancelledCodes = new Set();
 
 function ticketStatus(row, now = Date.now()) {
   if (new Date(row.valid_until).getTime() <= now) return 'expired';
-  if (row.entry_count >= 2) return 'completed';
-  if (row.entry_count === 1) return 'checked_in';
+  const maxDays = Number(row.max_days) || Math.max(1, Math.round((new Date(row.valid_until) - new Date(row.issued_at)) / 86400000));
+  if (row.entry_count >= maxDays) return 'completed';
+  if (row.entry_count > 0) return 'checked_in';
   return 'valid';
 }
 function serializeTicket(row) { return { ...row, status: ticketStatus(row) }; }
@@ -277,20 +284,20 @@ app.post('/api/admin/logout', requireAdmin, (req, res) => req.session.destroy((e
 }));
 
 app.get('/api/admin/config', requireAdmin, (req, res) => {
-  const mailCfg = getMailConfig();
   res.json({
-    validDays: TICKET_VALID_DAYS,
-    mail: {
-      configured: emailAvailable(),
-      channel: emailChannel(),
-      smtpConfigured: mailConfigured(),
-      from: mailConfigured() ? fromAddress() : null,
-      user: mailCfg.user || null,
-      fromName: mailCfg.fromName,
-      isGmail: !mailCfg.host || mailCfg.host.includes('gmail')
-    },
+    validDays: getDefaultValidDays(),
     sheets: getSheetsConfig()
   });
+});
+
+app.get('/api/admin/settings/duration', requireAdmin, (req, res) => {
+  res.json({ validDays: getDefaultValidDays() });
+});
+
+app.post('/api/admin/settings/duration', requireAdmin, (req, res) => {
+  const days = Math.max(1, Math.min(30, Number(req.body.validDays || req.body.days || 2)));
+  setSetting('ticket_valid_days', String(days));
+  res.json({ validDays: days, message: `Default event duration set to ${days} day${days === 1 ? '' : 's'}.` });
 });
 
 app.get('/api/admin/summary', requireAdmin, (req, res) => {
@@ -328,15 +335,16 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
     const fullName = cleanText(req.body.fullName, 100);
     const email = cleanText(req.body.email, 180).toLowerCase();
     const phone = cleanText(req.body.phone, 30);
+    const days = Math.max(1, Math.min(30, Number(req.body.days || req.body.validDays || getDefaultValidDays())));
     if (!fullName || fullName.length < 2) {
       return res.status(400).json({ error: 'Please enter the participant full name.' });
     }
 
     const issued = new Date();
-    const validUntil = new Date(issued.getTime() + TICKET_VALID_DAYS * 24 * 60 * 60 * 1000);
+    const validUntil = new Date(issued.getTime() + days * 24 * 60 * 60 * 1000);
     const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
-    const result = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(fullName, email || '', phone || '', ticketCode, issued.toISOString(), validUntil.toISOString());
+    const result = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(fullName, email || '', phone || '', ticketCode, issued.toISOString(), validUntil.toISOString(), days);
     const ticket = getTicketById(Number(result.lastInsertRowid));
 
     // Auto-sync ticket to Google Sheet in background
@@ -351,6 +359,7 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
     const rawNames = Array.isArray(req.body.names)
       ? req.body.names
       : String(req.body.names || '').split(/\r?\n/);
+    const days = Math.max(1, Math.min(30, Number(req.body.days || req.body.validDays || getDefaultValidDays())));
 
     const names = rawNames
       .map((n) => cleanText(n, 100))
@@ -361,14 +370,14 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
     }
 
     const issued = new Date();
-    const validUntil = new Date(issued.getTime() + TICKET_VALID_DAYS * 24 * 60 * 60 * 1000);
-    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until) VALUES (?, '', '', ?, ?, ?)`);
+    const validUntil = new Date(issued.getTime() + days * 24 * 60 * 60 * 1000);
+    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days) VALUES (?, '', '', ?, ?, ?, ?)`);
 
     const createdTickets = [];
     db.transaction(() => {
       for (const name of names) {
         const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
-        const r = insertStmt.run(name, ticketCode, issued.toISOString(), validUntil.toISOString());
+        const r = insertStmt.run(name, ticketCode, issued.toISOString(), validUntil.toISOString(), days);
         createdTickets.push(getTicketById(Number(r.lastInsertRowid)));
       }
     })();
@@ -378,8 +387,9 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
     }
 
     res.status(201).json({
-      message: `Successfully issued ${createdTickets.length} ticket${createdTickets.length === 1 ? '' : 's'}.`,
+      message: `Successfully issued ${createdTickets.length} ticket${createdTickets.length === 1 ? '' : 's'} (${days} day${days === 1 ? '' : 's'} pass).`,
       count: createdTickets.length,
+      days,
       tickets: createdTickets.map(serializeTicket)
     });
   } catch (error) { next(error); }
@@ -423,8 +433,8 @@ async function handleCheckinRequest(req, res, next) {
         }
         if (found) {
           const issued = isoOr(found.issued_at, new Date().toISOString());
-          const validUntil = isoOr(found.valid_until, new Date(Date.now() + TICKET_VALID_DAYS * 86400000).toISOString());
-          db.prepare(`INSERT OR IGNORE INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          const validUntil = isoOr(found.valid_until, new Date(Date.now() + getDefaultValidDays() * 86400000).toISOString());
+          db.prepare(`INSERT OR IGNORE INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status, max_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
             found.full_name || 'Participant',
             found.email || '',
             found.phone || '',
@@ -434,7 +444,8 @@ async function handleCheckinRequest(req, res, next) {
             found.entry_count || 0,
             found.first_entry_at || null,
             found.last_entry_at || null,
-            found.email_status || 'not_sent'
+            found.email_status || 'not_sent',
+            getDefaultValidDays()
           );
           ticket = getTicketByCode(match[0]);
         }
@@ -446,11 +457,14 @@ async function handleCheckinRequest(req, res, next) {
       return res.status(410).json({ error: 'This ticket has expired.', ticket: serializeTicket(ticket) });
     }
 
-    // 1. Maximum 2 days / 2 total entries allowed
-    if (ticket.entry_count >= 2) {
+    const maxDays = Number(ticket.max_days) || Math.max(1, Math.round((new Date(ticket.valid_until) - new Date(ticket.issued_at)) / 86400000));
+
+    // 1. Total entries limit
+    if (ticket.entry_count >= maxDays) {
       return res.status(409).json({
-        error: 'Ticket limit reached: Yeh ticket pehle hi 2 din (Day 1 & Day 2) use ho chuka hai.',
+        error: `Ticket limit reached: Yeh ticket pehle hi all ${maxDays} din (${maxDays} entries) use ho chuka hai.`,
         limitReached: true,
+        maxDays,
         ticket: serializeTicket(ticket)
       });
     }
@@ -464,6 +478,7 @@ async function handleCheckinRequest(req, res, next) {
       return res.status(409).json({
         error: 'Yeh ticket aaj pehle hi use ho chuka hai! 1 din mein sirf 1 baar entry allowed hai (Already used today).',
         alreadyScannedToday: true,
+        maxDays,
         ticket: serializeTicket(ticket)
       });
     }
@@ -477,13 +492,15 @@ async function handleCheckinRequest(req, res, next) {
     sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
 
     const dayNumber = updated.entry_count;
-    const message = dayNumber === 1
-      ? 'Entry allowed! Welcome (Day 1 check-in successful).'
-      : 'Entry allowed! Welcome back (Day 2 check-in successful).';
+    const isFinalDay = dayNumber >= maxDays;
+    const message = isFinalDay
+      ? `Entry allowed! Welcome (Day ${dayNumber} of ${maxDays} check-in successful · Final Day).`
+      : `Entry allowed! Welcome (Day ${dayNumber} of ${maxDays} check-in successful).`;
 
     res.json({
       message,
       dayNumber,
+      maxDays,
       repeat: dayNumber > 1,
       ticket: updated
     });
