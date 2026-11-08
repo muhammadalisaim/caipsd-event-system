@@ -727,6 +727,12 @@ function setFrontTab(tabName) {
   const isCheckin = tabName === 'checkin';
   $('#tab-checkin-btn')?.classList.toggle('active', isCheckin);
   $('#tab-login-btn')?.classList.toggle('active', !isCheckin);
+  document.querySelectorAll('.header-nav .nav-link, .mobile-nav-link').forEach((link) => {
+    const linkTab = link.getAttribute('data-scroll-tab');
+    if (linkTab) {
+      link.classList.toggle('active', linkTab === tabName);
+    }
+  });
   if ($('#front-checkin-panel')) $('#front-checkin-panel').style.display = isCheckin ? 'flex' : 'none';
   if ($('#front-login-panel')) $('#front-login-panel').style.display = isCheckin ? 'none' : 'flex';
   if (!isCheckin) {
@@ -798,16 +804,6 @@ $('#header-login-btn')?.addEventListener('click', () => {
   }
 });
 
-// Hero Apply / Checkin button:
-$('#hero-apply-btn')?.addEventListener('click', (e) => {
-  e.preventDefault();
-  setFrontTab('checkin');
-  document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
-  setTimeout(() => {
-    $('#ticket-code-input')?.focus();
-  }, 400);
-});
-
 // Mobile menu toggle
 $('#mobile-nav-toggle')?.addEventListener('click', () => {
   const menu = $('#mobile-nav-menu');
@@ -825,14 +821,13 @@ document.querySelectorAll('[data-scroll-tab]').forEach((el) => {
   });
 });
 
-// Floating AI Chat & Hero AI Button:
+// Floating AI Chat
 function toggleAiChat() {
   const card = $('#ai-chat-card');
   if (!card) return;
   card.hidden = !card.hidden;
 }
 $('#floating-chat-btn')?.addEventListener('click', toggleAiChat);
-$('#hero-ai-btn')?.addEventListener('click', toggleAiChat);
 $('#ai-chat-close')?.addEventListener('click', () => {
   const card = $('#ai-chat-card');
   if (card) card.hidden = true;
