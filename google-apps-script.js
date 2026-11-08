@@ -213,6 +213,11 @@ function doPost(e) {
       });
     }
 
+    if (action === 'formatSheet') {
+      formatAndAlignSheet();
+      return respondJson({ status: 'ok', message: 'Sheet formatted and aligned successfully.' });
+    }
+
     if (action === 'syncAll') {
       var headers = payload.headers || [
         'Ticket ID', 'Full Name', 'Email', 'Phone', 'Issued At',
@@ -458,4 +463,202 @@ function findRowByTicketCode(sheet, code) {
 function respondJson(data) {
   return ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * ==============================================================================
+ * AUTO-ALIGN & FORMAT MENU FOR GOOGLE SHEETS
+ * ==============================================================================
+ * Jab Google Sheet open hoti hai, top toolbar par "⚡ CAIPSD Event" menu ban jata hai.
+ * Wahan se 1-click se sheet ko align aur auto-format kar sakte hain.
+ */
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('⚡ CAIPSD Event')
+    .addItem('✨ Align & Auto-Format Sheet', 'formatAndAlignSheet')
+    .addItem('🧹 Remove Blank Columns (C & D)', 'formatAndAlignSheet')
+    .addItem('🏷️ Restore All Headers (Email & Phone)', 'formatWithAllColumns')
+    .addToUi();
+}
+
+/**
+ * Align & Auto-Format Sheet:
+ * - Detects and removes empty blank gap columns (C & D).
+ * - Applies Executive Navy header styling (#0d1930) with bold white font and middle vertical alignment.
+ * - Formats data rows (Ticket ID centered monospace, Name left-aligned, Dates/Status centered).
+ * - Auto-resizes all column widths with comfortable padding.
+ * - Deletes excess empty columns (L, M, N...) for a clean app dashboard look.
+ */
+function formatAndAlignSheet() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName("CAIPSD_Tickets") || ss.getSheetByName("Tickets") || ss.getActiveSheet();
+  
+  var maxCols = sheet.getMaxColumns();
+  if (maxCols >= 4) {
+    var headerRow = sheet.getRange(1, 1, 1, Math.min(maxCols, 15)).getValues()[0];
+    var c1 = String(headerRow[2] || '').trim();
+    var d1 = String(headerRow[3] || '').trim();
+    
+    // If columns C and D are blank, delete them so data shifts left seamlessly
+    if (c1 === '' && d1 === '') {
+      sheet.deleteColumns(3, 2);
+    }
+  }
+
+  var cleanHeaders = [
+    'Ticket ID',
+    'Full Name',
+    'Issued At',
+    'Valid Until',
+    'Status',
+    'Entries',
+    'First Entry',
+    'Last Entry'
+  ];
+  
+  var numCols = cleanHeaders.length;
+  sheet.getRange(1, 1, 1, numCols).setValues([cleanHeaders]);
+  
+  // Style header row
+  var headerRange = sheet.getRange(1, 1, 1, numCols);
+  headerRange
+    .setFontWeight('bold')
+    .setFontFamily('Arial')
+    .setFontSize(10.5)
+    .setFontColor('#FFFFFF')
+    .setBackground('#0d1930')
+    .setVerticalAlignment('middle')
+    .setHorizontalAlignment('center');
+  
+  // Full Name left aligned
+  sheet.getRange(1, 2).setHorizontalAlignment('left');
+  
+  sheet.setRowHeight(1, 38);
+  sheet.setFrozenRows(1);
+  
+  // Format data rows if they exist
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var dataRows = lastRow - 1;
+    var allData = sheet.getRange(2, 1, dataRows, numCols);
+    
+    allData
+      .setFontFamily('Arial')
+      .setFontSize(10)
+      .setVerticalAlignment('middle')
+      .setFontColor('#1e293b');
+      
+    for (var r = 2; r <= lastRow; r++) {
+      sheet.setRowHeight(r, 32);
+    }
+    
+    // Col 1: Ticket ID (Center, Monospace, Bold)
+    sheet.getRange(2, 1, dataRows, 1)
+      .setHorizontalAlignment('center')
+      .setFontFamily('Courier New')
+      .setFontWeight('bold')
+      .setFontColor('#0f172a');
+      
+    // Col 2: Full Name (Left, Bold)
+    sheet.getRange(2, 2, dataRows, 1)
+      .setHorizontalAlignment('left')
+      .setFontWeight('bold');
+      
+    // Col 3 & 4: Issued At, Valid Until (Center)
+    sheet.getRange(2, 3, dataRows, 2)
+      .setHorizontalAlignment('center')
+      .setFontColor('#475569');
+      
+    // Col 5: Status (Center, Bold)
+    sheet.getRange(2, 5, dataRows, 1)
+      .setHorizontalAlignment('center')
+      .setFontWeight('bold');
+      
+    // Col 6: Entries (Center, Bold)
+    sheet.getRange(2, 6, dataRows, 1)
+      .setHorizontalAlignment('center')
+      .setFontWeight('bold');
+      
+    // Col 7 & 8: First & Last Entry (Center)
+    sheet.getRange(2, 7, dataRows, 2)
+      .setHorizontalAlignment('center')
+      .setFontColor('#475569');
+      
+    allData.setBorder(true, true, true, true, true, true, '#e2e8f0', SpreadsheetApp.BorderStyle.SOLID);
+  }
+  
+  // Auto-resize columns with generous padding
+  sheet.autoResizeColumns(1, numCols);
+  for (var c = 1; c <= numCols; c++) {
+    var w = sheet.getColumnWidth(c);
+    var minW = (c === 1 ? 160 : (c === 2 ? 180 : 120));
+    sheet.setColumnWidth(c, Math.max(w + 24, minW));
+  }
+  
+  // Clean up excess columns beyond data columns
+  var curMaxCols = sheet.getMaxColumns();
+  if (curMaxCols > numCols) {
+    sheet.deleteColumns(numCols + 1, curMaxCols - numCols);
+  }
+  
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast('✓ Sheet aligned and formatted successfully!', 'CAIPSD Event', 4);
+  } catch(e) {}
+}
+
+/**
+ * Restores all 11 columns (including Email & Phone) and applies full alignment
+ */
+function formatWithAllColumns() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName("CAIPSD_Tickets") || ss.getSheetByName("Tickets") || ss.getActiveSheet();
+  
+  var allHeaders = [
+    'Ticket ID',
+    'Full Name',
+    'Email',
+    'Phone',
+    'Issued At',
+    'Valid Until',
+    'Status',
+    'Entries',
+    'First Entry',
+    'Last Entry',
+    'Email Status'
+  ];
+  
+  var numCols = allHeaders.length;
+  sheet.getRange(1, 1, 1, numCols).setValues([allHeaders]);
+  
+  var headerRange = sheet.getRange(1, 1, 1, numCols);
+  headerRange
+    .setFontWeight('bold')
+    .setFontFamily('Arial')
+    .setFontSize(10.5)
+    .setFontColor('#FFFFFF')
+    .setBackground('#0d1930')
+    .setVerticalAlignment('middle')
+    .setHorizontalAlignment('center');
+  
+  sheet.getRange(1, 2).setHorizontalAlignment('left'); // Full Name
+  sheet.getRange(1, 3).setHorizontalAlignment('left'); // Email
+  
+  sheet.setRowHeight(1, 38);
+  sheet.setFrozenRows(1);
+  
+  sheet.autoResizeColumns(1, numCols);
+  for (var c = 1; c <= numCols; c++) {
+    var w = sheet.getColumnWidth(c);
+    var minW = (c === 1 ? 160 : (c === 2 ? 180 : (c === 3 ? 180 : 120)));
+    sheet.setColumnWidth(c, Math.max(w + 24, minW));
+  }
+  
+  var curMaxCols = sheet.getMaxColumns();
+  if (curMaxCols > numCols) {
+    sheet.deleteColumns(numCols + 1, curMaxCols - numCols);
+  }
+  
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast('✓ All 11 columns restored and aligned!', 'CAIPSD Event', 4);
+  } catch(e) {}
 }
