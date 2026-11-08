@@ -808,7 +808,7 @@ async function handleStaticApi(url, options = {}) {
     return { ticket: newTicket, email: emailResult };
   }
 
-  if (url === '/api/admin/check-in' && method === 'POST') {
+  if ((url === '/api/admin/check-in' || url === '/api/check-in') && method === 'POST') {
     const code = extractTicketCode(body.ticketCode);
     if (!code) {
       const err = new Error('Enter a valid ticket code or scan a CAIPSD ticket QR.');
@@ -1020,19 +1020,60 @@ async function api(url, options = {}) {
   return data;
 }
 
+let currentAdminEmail = null;
+
+function setFrontTab(tabName) {
+  const isCheckin = tabName === 'checkin';
+  $('#tab-checkin-btn')?.classList.toggle('active', isCheckin);
+  $('#tab-login-btn')?.classList.toggle('active', !isCheckin);
+  if ($('#front-checkin-panel')) $('#front-checkin-panel').style.display = isCheckin ? 'flex' : 'none';
+  if ($('#front-login-panel')) $('#front-login-panel').style.display = isCheckin ? 'none' : 'flex';
+  if (!isCheckin) {
+    stopScanner();
+  } else {
+    $('#ticket-code-input')?.focus();
+  }
+}
+
 function showLogin() {
+  currentAdminEmail = null;
   $('#admin-app').hidden = true;
   $('#login-screen').hidden = false;
+  if ($('#admin-session-banner')) $('#admin-session-banner').style.display = 'none';
   $('#login-error').textContent = '';
   $('#login-form').reset();
+  setFrontTab('checkin');
 }
+
 function showApp(email) {
+  currentAdminEmail = email;
+  stopScanner();
   $('#login-screen').hidden = true;
   $('#admin-app').hidden = false;
   $('#admin-email').textContent = email || 'Organizer';
   $('#admin-avatar').textContent = (email || 'A').charAt(0).toUpperCase();
+  if ($('#session-banner-email')) $('#session-banner-email').textContent = email || 'Organizer';
   loadConfig().then(loadDashboard);
 }
+
+function openGateCheckin() {
+  $('#admin-app').hidden = true;
+  $('#login-screen').hidden = false;
+  if (currentAdminEmail && $('#admin-session-banner')) {
+    $('#admin-session-banner').style.display = 'flex';
+  }
+  setFrontTab('checkin');
+}
+
+$('#tab-checkin-btn')?.addEventListener('click', () => setFrontTab('checkin'));
+$('#tab-login-btn')?.addEventListener('click', () => setFrontTab('login'));
+$('#return-admin-btn')?.addEventListener('click', () => {
+  stopScanner();
+  $('#login-screen').hidden = true;
+  $('#admin-app').hidden = false;
+});
+$('#topbar-gate-btn')?.addEventListener('click', openGateCheckin);
+$('#quick-open-gate')?.addEventListener('click', openGateCheckin);
 
 $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -1058,14 +1099,17 @@ $('#logout-button').addEventListener('click', async () => {
 });
 
 function setView(viewName) {
-  if (!['overview', 'tickets', 'attendance', 'sheets'].includes(viewName)) return;
+  if (viewName === 'attendance') {
+    openGateCheckin();
+    return;
+  }
+  if (!['overview', 'tickets', 'sheets'].includes(viewName)) return;
   $$('.view-section').forEach((section) => section.classList.toggle('active', section.id === `view-${viewName}`));
   $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === viewName));
-  $('#breadcrumb-current').textContent = ({ overview: 'Overview', tickets: 'Tickets', attendance: 'Entry check-in' })[viewName] || 'Overview';
+  $('#breadcrumb-current').textContent = ({ overview: 'Overview', tickets: 'Tickets' })[viewName] || 'Overview';
   $('#sidebar').classList.remove('open');
   if (viewName === 'overview') loadDashboard();
   if (viewName === 'tickets') loadTickets();
-  if (viewName === 'attendance') $('#ticket-code-input').focus();
 }
 $$('.nav-item').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
 $$('[data-view-link]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.viewLink)));
@@ -1560,7 +1604,12 @@ async function performCheckin(ticketCode) {
   note.textContent = 'Verifying ticket…';
   note.className = 'scanner-message';
   try {
-    const result = await api('/api/admin/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
+    let result;
+    try {
+      result = await api('/api/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
+    } catch (e1) {
+      result = await api('/api/admin/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
+    }
     showCheckinResult(result.repeat ? 'warning' : 'success', result.message, result.ticket, result.repeat ? `Previous entry: ${dateTimeLabel(result.ticket.first_entry_at)}` : '');
     note.textContent = result.message; note.className = 'scanner-message success';
     $('#ticket-code-input').value = '';

@@ -374,7 +374,7 @@ app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
   res.json({ message: 'Ticket cancelled. Its QR code will no longer work.' });
 });
 
-app.post('/api/admin/check-in', requireAdmin, async (req, res, next) => {
+async function handleCheckinRequest(req, res, next) {
   try {
     const code = extractTicketCode(req.body.ticketCode);
     const match = code.match(/^[A-F0-9]{16}$/);
@@ -418,7 +418,10 @@ app.post('/api/admin/check-in', requireAdmin, async (req, res, next) => {
     const repeat = updated.entry_count > 1;
     res.json({ message: repeat ? `Entry allowed (visit ${updated.entry_count}).` : 'Entry allowed. Welcome!', repeat, ticket: updated });
   } catch (error) { next(error); }
-});
+}
+
+app.post('/api/check-in', handleCheckinRequest);
+app.post('/api/admin/check-in', requireAdmin, handleCheckinRequest);
 
 app.get('/api/admin/sheets/config', requireAdmin, (req, res) => {
   res.json({ config: getSheetsConfig() });
