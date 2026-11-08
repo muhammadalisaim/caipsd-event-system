@@ -272,7 +272,48 @@ async function syncTicketsFromGoogleSheet() {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) continue;
       const text = await res.text();
-      let imported = [];
+      function parseRowItem(c, i) {
+        const getV = (col) => {
+          if (!col) return '';
+          if (typeof col === 'object') return String(col.v !== undefined ? col.v : (col.f !== undefined ? col.f : '')).trim();
+          return String(col).trim();
+        };
+        const code = getV(c[0]).replace(/^'/, '').toUpperCase();
+        if (!code || code.length < 8 || code === 'TICKET ID') return null;
+        const name = getV(c[1]) || 'Participant';
+        const val2 = getV(c[2]);
+        const is11 = val2.includes('@') || (c.length > 9 && !val2.includes('-') && !val2.includes('T'));
+        if (is11) {
+          return {
+            id: Date.now() + i,
+            ticket_code: code,
+            full_name: name,
+            email: val2,
+            phone: getV(c[3]),
+            issued_at: getV(c[4]) || new Date().toISOString(),
+            valid_until: getV(c[5]) || new Date(Date.now() + 3 * 86400000).toISOString(),
+            status: getV(c[6]) || 'valid',
+            entry_count: Number(getV(c[7]) || 0),
+            first_entry_at: getV(c[8]) || null,
+            last_entry_at: getV(c[9]) || null,
+            email_status: getV(c[10]) || 'not_sent'
+          };
+        }
+        return {
+          id: Date.now() + i,
+          ticket_code: code,
+          full_name: name,
+          email: '',
+          phone: '',
+          issued_at: val2 || new Date().toISOString(),
+          valid_until: getV(c[3]) || new Date(Date.now() + 3 * 86400000).toISOString(),
+          status: getV(c[4]) || 'valid',
+          entry_count: Number(getV(c[5]) || 0),
+          first_entry_at: getV(c[6]) || null,
+          last_entry_at: getV(c[7]) || null,
+          email_status: 'not_sent'
+        };
+      }
 
       if (url.includes('gviz/tq')) {
         const start = text.indexOf('{');
@@ -280,25 +321,7 @@ async function syncTicketsFromGoogleSheet() {
         if (start !== -1 && end > start) {
           const json = JSON.parse(text.slice(start, end + 1));
           if (json.table && Array.isArray(json.table.rows)) {
-            imported = json.table.rows.map((r, i) => {
-              const c = r.c || [];
-              const code = c[0] ? String(c[0].v || c[0].f || '').replace(/^'/, '').trim().toUpperCase() : '';
-              if (!code || code.length < 8) return null;
-              return {
-                id: Date.now() + i,
-                ticket_code: code,
-                full_name: c[1] ? String(c[1].v || c[1].f || '').trim() : 'Participant',
-                email: c[2] ? String(c[2].v || c[2].f || '').trim() : '',
-                phone: c[3] ? String(c[3].v || c[3].f || '').trim() : '',
-                issued_at: c[4] ? String(c[4].v || c[4].f || '').trim() : new Date().toISOString(),
-                valid_until: c[5] ? String(c[5].v || c[5].f || '').trim() : new Date(Date.now() + 3 * 86400000).toISOString(),
-                status: c[6] ? String(c[6].v || c[6].f || 'valid').trim() : 'valid',
-                entry_count: c[7] ? Number(c[7].v || 0) : 0,
-                first_entry_at: c[8] ? String(c[8].v || c[8].f || '').trim() : null,
-                last_entry_at: c[9] ? String(c[9].v || c[9].f || '').trim() : null,
-                email_status: c[10] ? String(c[10].v || c[10].f || 'not_sent').trim() : 'not_sent'
-              };
-            }).filter(Boolean);
+            imported = json.table.rows.map((r, i) => parseRowItem(r.c || [], i)).filter(Boolean);
           }
         }
       } else {
@@ -306,22 +329,8 @@ async function syncTicketsFromGoogleSheet() {
         if (lines.length > 1) {
           for (let i = 1; i < lines.length; i++) {
             const cols = lines[i].split(',').map((x) => x.replace(/^["']|["']$/g, '').trim());
-            const code = cols[0] ? cols[0].toUpperCase() : '';
-            if (!code || code.length < 8) continue;
-            imported.push({
-              id: Date.now() + i,
-              ticket_code: code,
-              full_name: cols[1] || 'Participant',
-              email: cols[2] || '',
-              phone: cols[3] || '',
-              issued_at: cols[4] || new Date().toISOString(),
-              valid_until: cols[5] || new Date(Date.now() + 3 * 86400000).toISOString(),
-              status: cols[6] || 'valid',
-              entry_count: Number(cols[7] || 0),
-              first_entry_at: cols[8] || null,
-              last_entry_at: cols[9] || null,
-              email_status: cols[10] || 'not_sent'
-            });
+            const parsed = parseRowItem(cols, i);
+            if (parsed) imported.push(parsed);
           }
         }
       }

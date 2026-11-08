@@ -56,14 +56,17 @@ async function loadTicket() {
                 });
                 if (matchRow) {
                   const c = matchRow.c || [];
+                  const getV = (col) => (col ? String(col.v !== undefined ? col.v : (col.f !== undefined ? col.f : '')).trim() : '');
+                  const val2 = getV(c[2]);
+                  const is11 = val2.includes('@') || (c.length > 9 && !val2.includes('-') && !val2.includes('T'));
                   found = {
-                    full_name: c[1] ? String(c[1].v || c[1].f || '').trim() : 'Participant',
-                    email: c[2] ? String(c[2].v || c[2].f || '').trim() : '',
-                    phone: c[3] ? String(c[3].v || c[3].f || '').trim() : '',
-                    issued_at: c[4] ? String(c[4].v || c[4].f || '').trim() : new Date().toISOString(),
-                    valid_until: c[5] ? String(c[5].v || c[5].f || '').trim() : new Date(Date.now() + 3 * 86400000).toISOString(),
-                    status: c[6] ? String(c[6].v || c[6].f || 'valid').trim() : 'valid',
-                    entry_count: c[7] ? Number(c[7].v || 0) : 0,
+                    full_name: getV(c[1]) || 'Participant',
+                    email: is11 ? val2 : '',
+                    phone: is11 ? getV(c[3]) : '',
+                    issued_at: is11 ? getV(c[4]) : val2,
+                    valid_until: is11 ? getV(c[5]) : getV(c[3]),
+                    status: (is11 ? getV(c[6]) : getV(c[4])) || 'valid',
+                    entry_count: Number((is11 ? getV(c[7]) : getV(c[5])) || 0),
                     ticket_code: code
                   };
                 }
