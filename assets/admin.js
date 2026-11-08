@@ -474,6 +474,61 @@ async function handleStaticApi(url, options = {}) {
     return { ticket: newTicket, email: emailResult };
   }
 
+  if (url === '/api/admin/tickets/bulk' && method === 'POST') {
+    const rawNames = Array.isArray(body.names)
+      ? body.names
+      : String(body.names || '').split(/\r?\n/);
+    const days = Math.max(1, Math.min(30, Number(body.days || body.validDays || 2)));
+    const names = rawNames.map((n) => String(n || '').trim()).filter((n) => n.length >= 2);
+    if (!names.length) {
+      const err = new Error('Please enter at least one participant name.');
+      err.status = 400;
+      throw err;
+    }
+    const list = getLocalTickets();
+    const now = new Date();
+    const validUntil = new Date(now.getTime() + days * 86400000);
+    const createdTickets = [];
+    for (const name of names) {
+      const hex = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+        .map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+      const newTicket = {
+        id: Date.now() + Math.floor(Math.random() * 1000000),
+        full_name: name,
+        email: '',
+        phone: '',
+        ticket_code: hex,
+        issued_at: now.toISOString(),
+        valid_until: validUntil.toISOString(),
+        entry_count: 0,
+        first_entry_at: null,
+        last_entry_at: null,
+        email_status: 'not_sent',
+        max_days: days,
+        status: 'valid'
+      };
+      createdTickets.push(newTicket);
+      list.unshift(newTicket);
+      pushTicketToSheet(newTicket, 'appendTicket');
+    }
+    saveLocalTickets(list);
+    return {
+      message: `Successfully issued ${createdTickets.length} ticket${createdTickets.length === 1 ? '' : 's'} (${days} day${days === 1 ? '' : 's'} pass).`,
+      count: createdTickets.length,
+      days,
+      tickets: createdTickets
+    };
+  }
+
+  if (url === '/api/admin/settings/duration') {
+    if (method === 'POST') {
+      const days = Math.max(1, Math.min(30, Number(body.validDays || body.days || 2)));
+      localStorage.setItem('caipsd_ticket_days', String(days));
+      return { validDays: days, message: `Default event duration set to ${days} day${days === 1 ? '' : 's'}.` };
+    }
+    return { validDays: Number(localStorage.getItem('caipsd_ticket_days')) || 2 };
+  }
+
   if ((url === '/api/admin/check-in' || url === '/api/check-in') && method === 'POST') {
     const code = extractTicketCode(body.ticketCode);
     if (!code) {
@@ -686,6 +741,7 @@ function showLogin() {
   $('#admin-app').hidden = true;
   $('#login-screen').hidden = false;
   if ($('#admin-session-banner')) $('#admin-session-banner').style.display = 'none';
+  if ($('#header-login-btn')) $('#header-login-btn').textContent = 'Login';
   $('#login-error').textContent = '';
   $('#login-form').reset();
   setFrontTab('checkin');
@@ -699,6 +755,7 @@ function showApp(email) {
   $('#admin-email').textContent = email || 'Organizer';
   $('#admin-avatar').textContent = (email || 'A').charAt(0).toUpperCase();
   if ($('#session-banner-email')) $('#session-banner-email').textContent = email || 'Organizer';
+  if ($('#header-login-btn')) $('#header-login-btn').textContent = 'Admin Workspace →';
   loadConfig().then(loadDashboard);
 }
 
@@ -709,6 +766,7 @@ function openGateCheckin() {
     $('#admin-session-banner').style.display = 'flex';
   }
   setFrontTab('checkin');
+  document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
 }
 
 $('#tab-checkin-btn')?.addEventListener('click', () => setFrontTab('checkin'));
@@ -720,6 +778,94 @@ $('#return-admin-btn')?.addEventListener('click', () => {
 });
 $('#topbar-gate-btn')?.addEventListener('click', openGateCheckin);
 $('#quick-open-gate')?.addEventListener('click', openGateCheckin);
+
+// Header Login button:
+$('#header-login-btn')?.addEventListener('click', () => {
+  if (currentAdminEmail) {
+    stopScanner();
+    $('#login-screen').hidden = true;
+    $('#admin-app').hidden = false;
+  } else {
+    setFrontTab('login');
+    document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => {
+      const pwd = $('#login-form input[name="password"]');
+      if (pwd) pwd.focus();
+    }, 400);
+  }
+});
+
+// Hero Apply / Checkin button:
+$('#hero-apply-btn')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  setFrontTab('checkin');
+  document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
+  setTimeout(() => {
+    $('#ticket-code-input')?.focus();
+  }, 400);
+});
+
+// Mobile menu toggle
+$('#mobile-nav-toggle')?.addEventListener('click', () => {
+  const menu = $('#mobile-nav-menu');
+  if (menu) menu.hidden = !menu.hidden;
+});
+
+// Nav links with scroll tab
+document.querySelectorAll('[data-scroll-tab]').forEach((el) => {
+  el.addEventListener('click', (e) => {
+    e.preventDefault();
+    const tab = el.getAttribute('data-scroll-tab');
+    if (tab) setFrontTab(tab);
+    $('#mobile-nav-menu')?.setAttribute('hidden', '');
+    document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+
+// Floating AI Chat & Hero AI Button:
+function toggleAiChat() {
+  const card = $('#ai-chat-card');
+  if (!card) return;
+  card.hidden = !card.hidden;
+}
+$('#floating-chat-btn')?.addEventListener('click', toggleAiChat);
+$('#hero-ai-btn')?.addEventListener('click', toggleAiChat);
+$('#ai-chat-close')?.addEventListener('click', () => {
+  const card = $('#ai-chat-card');
+  if (card) card.hidden = true;
+});
+
+$('#ai-opt-checkin')?.addEventListener('click', () => {
+  const card = $('#ai-chat-card');
+  if (card) card.hidden = true;
+  setFrontTab('checkin');
+  document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
+});
+$('#ai-opt-login')?.addEventListener('click', () => {
+  const card = $('#ai-chat-card');
+  if (card) card.hidden = true;
+  setFrontTab('login');
+  document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
+});
+$('#ai-opt-rules')?.addEventListener('click', () => {
+  const ans = $('#ai-chat-answer');
+  if (!ans) return;
+  ans.style.display = 'block';
+  ans.innerHTML = `<strong>📅 Event Validity Policy:</strong><br>
+  • Har ticket par <strong>1 calendar day mein sirf 1 scan</strong> allowed hai.<br>
+  • Total event duration portal se set ki ja sakti hai (jaise 2, 3, ya 4 din).<br>
+  • Same day par repeat scan ya validity khatam hone par ticket block hota hai.`;
+});
+$('#ai-opt-support')?.addEventListener('click', () => {
+  const ans = $('#ai-chat-answer');
+  if (!ans) return;
+  ans.style.display = 'block';
+  ans.innerHTML = `<strong>📞 Event Organizer Support:</strong><br>
+  Centre of AI &amp; Professional Skills Development (CAIPSD)<br>
+  The Islamia University of Bahawalpur<br>
+  Email: <code>admin@caipsd.org</code><br>
+  Google Sheets Auto-Sync: <strong>Active ✓</strong>`;
+});
 
 $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -1327,7 +1473,9 @@ $('#bulk-form')?.addEventListener('submit', async (event) => {
   try {
     const data = await api('/api/admin/tickets/bulk', { method: 'POST', body: JSON.stringify({ names: text, days }) });
     closeBulkModal();
-    toast(`✓ ${data.message}`);
+    const count = data.count || (data.tickets ? data.tickets.length : '');
+    const msg = data.message || (count ? `Successfully issued ${count} tickets.` : 'Tickets issued successfully.');
+    toast(`✓ ${msg}`);
     refreshStats();
     if ($('#view-tickets').classList.contains('active')) loadTickets();
     else if ($('#view-overview').classList.contains('active')) loadDashboard();
