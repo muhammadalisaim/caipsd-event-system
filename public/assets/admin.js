@@ -754,8 +754,14 @@ function showLogin() {
   if ($('#header-login-btn')) $('#header-login-btn').style.display = 'none';
   $('#login-error').textContent = '';
   $('#login-form').reset();
-  setFrontTab('checkin');
+  const initTab = location.hash === '#login' ? 'login' : 'checkin';
+  setFrontTab(initTab);
 }
+
+window.addEventListener('hashchange', () => {
+  if (location.hash === '#login') setFrontTab('login');
+  else if (location.hash === '#checkin') setFrontTab('checkin');
+});
 
 function showApp(email) {
   currentAdminEmail = email;
