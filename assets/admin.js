@@ -777,7 +777,10 @@ $('#return-admin-btn')?.addEventListener('click', () => {
   $('#admin-app').hidden = false;
 });
 $('#topbar-gate-btn')?.addEventListener('click', openGateCheckin);
+$('#sidebar-gate-btn')?.addEventListener('click', openGateCheckin);
 $('#quick-open-gate')?.addEventListener('click', openGateCheckin);
+$('#sidebar-duration-btn')?.addEventListener('click', openDurationModal);
+$('#quick-duration-action')?.addEventListener('click', openDurationModal);
 
 // Header Login button:
 $('#header-login-btn')?.addEventListener('click', () => {
@@ -917,6 +920,9 @@ async function loadConfig() {
   if ($('#setting-duration-select')) $('#setting-duration-select').value = String(days);
   if ($('#ticket-days-select')) $('#ticket-days-select').value = String(days);
   if ($('#bulk-days-select')) $('#bulk-days-select').value = String(days);
+  document.querySelectorAll('.dyn-policy-days').forEach((el) => {
+    el.textContent = `${days} Day${days === 1 ? '' : 's'}`;
+  });
   const configured = Boolean(appConfig.mail && appConfig.mail.configured);
   if ($('#send-email-checkbox')) {
     $('#send-email-checkbox').checked = configured;
@@ -1150,6 +1156,9 @@ $('#duration-form')?.addEventListener('submit', async (e) => {
     if ($('#valid-days')) $('#valid-days').textContent = appConfig.validDays;
     if ($('#ticket-days-select')) $('#ticket-days-select').value = String(appConfig.validDays);
     if ($('#bulk-days-select')) $('#bulk-days-select').value = String(appConfig.validDays);
+    document.querySelectorAll('.dyn-policy-days').forEach((el) => {
+      el.textContent = `${appConfig.validDays} Day${appConfig.validDays === 1 ? '' : 's'}`;
+    });
     closeDurationModal();
     toast(`✓ Event duration updated to ${appConfig.validDays} days.`);
   } catch (err) {

@@ -12,50 +12,41 @@
   <link rel="stylesheet" href="assets/admin.css" />
 </head>
 <body class="admin-body">
-  <!-- Top Navigation Bar (from CAIPSD official design) -->
-  <header class="site-header" id="site-header">
-    <div class="header-inner">
-      <div class="header-brand">
-        <a href="#hero" class="brand-link">
-          <img src="assets/caipsd-logo-white.png" alt="CAIPSD Logo" class="header-logo-img" />
-        </a>
-      </div>
-      <nav class="header-nav" id="header-nav">
-        <a href="#hero" class="nav-link active">Home</a>
-        <a href="#portal-section" class="nav-link" data-scroll-tab="checkin">Check-in</a>
-        <a href="#portal-section" class="nav-link">About Us</a>
-        <a href="#portal-section" class="nav-link">Leadership</a>
-        <a href="#portal-section" class="nav-link">Programs</a>
-        <a href="#portal-section" class="nav-link">How to Apply</a>
-        <a href="#portal-section" class="nav-link">Insights</a>
-        <a href="#portal-section" class="nav-link">Contact</a>
-      </nav>
-      <div class="header-actions">
-        <button type="button" class="btn-nav-login" id="header-login-btn">Login</button>
-        <button type="button" class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Toggle navigation">☰</button>
-      </div>
-    </div>
-    <!-- Mobile dropdown menu -->
-    <div class="mobile-nav-menu" id="mobile-nav-menu" hidden>
-      <a href="#hero" class="mobile-nav-link active">Home</a>
-      <a href="#portal-section" class="mobile-nav-link" data-scroll-tab="checkin">⌗ Gate Entry Check-in</a>
-      <a href="#portal-section" class="mobile-nav-link" data-scroll-tab="login">🔐 Admin Portal Sign In</a>
-      <a href="#portal-section" class="mobile-nav-link">About Us</a>
-      <a href="#portal-section" class="mobile-nav-link">Programs</a>
-      <a href="#portal-section" class="mobile-nav-link">Contact</a>
-    </div>
-  </header>
-
-  <!-- Marquee Ticker Strip (from CAIPSD official design) -->
-  <div class="site-ticker">
-    <div class="ticker-track">
-      <span class="ticker-text">LEARN, BUILD, AND LAUNCH YOUR TECH CAREER • REGISTRATIONS ARE OPEN! • LEARN, BUILD, AND LAUNCH YOUR TECH CAREER • REGISTRATIONS ARE NOW OPEN! •</span>
-      <span class="ticker-text" aria-hidden="true">LEARN, BUILD, AND LAUNCH YOUR TECH CAREER • REGISTRATIONS ARE OPEN! • LEARN, BUILD, AND LAUNCH YOUR TECH CAREER • REGISTRATIONS ARE NOW OPEN! •</span>
-    </div>
-  </div>
-
   <div id="login-screen" class="front-landing">
-    <!-- Hero Section (from CAIPSD official design) -->
+    <!-- Top Navigation Bar (Clean & Functional) -->
+    <header class="site-header" id="site-header">
+      <div class="header-inner">
+        <div class="header-brand">
+          <a href="#hero" class="brand-link">
+            <img src="assets/caipsd-logo-white.png" alt="CAIPSD Logo" class="header-logo-img" />
+          </a>
+        </div>
+        <nav class="header-nav" id="header-nav">
+          <a href="#hero" class="nav-link active">Home</a>
+          <a href="#portal-section" class="nav-link" data-scroll-tab="checkin">⌗ Gate Check-in</a>
+        </nav>
+        <div class="header-actions">
+          <button type="button" class="btn-nav-login" id="header-login-btn">🔐 Admin Sign In</button>
+          <button type="button" class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Toggle navigation">☰</button>
+        </div>
+      </div>
+      <!-- Mobile dropdown menu -->
+      <div class="mobile-nav-menu" id="mobile-nav-menu" hidden>
+        <a href="#hero" class="mobile-nav-link active">Home</a>
+        <a href="#portal-section" class="mobile-nav-link" data-scroll-tab="checkin">⌗ Gate Entry Check-in</a>
+        <a href="#portal-section" class="mobile-nav-link" data-scroll-tab="login">🔐 Admin Portal Sign In</a>
+      </div>
+    </header>
+
+    <!-- Marquee Ticker Strip -->
+    <div class="site-ticker">
+      <div class="ticker-track">
+        <span class="ticker-text">LEARN, BUILD, AND LAUNCH YOUR TECH CAREER • REGISTRATIONS ARE OPEN! • LEARN, BUILD, AND LAUNCH YOUR TECH CAREER • REGISTRATIONS ARE NOW OPEN! •</span>
+        <span class="ticker-text" aria-hidden="true">LEARN, BUILD, AND LAUNCH YOUR TECH CAREER • REGISTRATIONS ARE OPEN! • LEARN, BUILD, AND LAUNCH YOUR TECH CAREER • REGISTRATIONS ARE NOW OPEN! •</span>
+      </div>
+    </div>
+
+    <!-- Hero Section -->
     <section id="hero" class="hero-section">
       <div class="hero-container">
         <div class="hero-content">
@@ -69,8 +60,8 @@
             Empowering students with practical skills, industry knowledge, and real world experience to confidently step into their professional careers.
           </p>
           <div class="hero-cta-group">
-            <a href="#portal-section" class="btn-hero-primary" id="hero-apply-btn">Apply Now</a>
-            <button type="button" class="btn-hero-secondary" id="hero-ai-btn">Get help with AI</button>
+            <a href="#portal-section" class="btn-hero-primary" id="hero-apply-btn">⌗ Gate Entry Check-in</a>
+            <a href="#portal-section" class="btn-hero-secondary" id="hero-admin-btn" data-scroll-tab="login">🔐 Admin Sign In</a>
           </div>
         </div>
         <div class="hero-visual-wrapper">
@@ -205,54 +196,56 @@
         </div>
       </div>
     </section>
-  </div>
 
-  <!-- Floating Chat Button (from screenshot) -->
-  <button type="button" class="floating-chat-btn" id="floating-chat-btn" aria-label="AI Help &amp; Support" title="CAIPSD AI Assistant">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 10H6v-2h12v2zm0-3H6V7h12v2z"/>
-    </svg>
-  </button>
+    <!-- Floating Chat Button (Only on Public Page) -->
+    <button type="button" class="floating-chat-btn" id="floating-chat-btn" aria-label="AI Help &amp; Support" title="CAIPSD AI Assistant">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 10H6v-2h12v2zm0-3H6V7h12v2z"/>
+      </svg>
+    </button>
 
-  <!-- Interactive AI Assistant Modal / Card -->
-  <div id="ai-chat-card" class="ai-chat-card" hidden>
-    <div class="ai-chat-head">
-      <div class="ai-chat-brand">
-        <div class="ai-chat-avatar">✦</div>
-        <div>
-          <strong>CAIPSD AI Assistant</strong>
-          <small>The Islamia University of Bahawalpur</small>
+    <!-- Interactive AI Assistant Modal -->
+    <div id="ai-chat-card" class="ai-chat-card" hidden>
+      <div class="ai-chat-head">
+        <div class="ai-chat-brand">
+          <div class="ai-chat-avatar">✦</div>
+          <div>
+            <strong>CAIPSD AI Assistant</strong>
+            <small>The Islamia University of Bahawalpur</small>
+          </div>
         </div>
+        <button type="button" class="ai-chat-close" id="ai-chat-close" aria-label="Close">×</button>
       </div>
-      <button type="button" class="ai-chat-close" id="ai-chat-close" aria-label="Close">×</button>
-    </div>
-    <div class="ai-chat-body">
-      <p>Assalam-o-Alaikum! Welcome to the <strong>CAIPSD Event Portal</strong>. How can I assist you?</p>
-      <div class="ai-chat-options">
-        <button type="button" class="ai-opt-btn" id="ai-opt-checkin">⌗ Gate Check-in &amp; Scanner</button>
-        <button type="button" class="ai-opt-btn" id="ai-opt-login">🔐 Organizer Workspace Login</button>
-        <button type="button" class="ai-opt-btn" id="ai-opt-rules">📅 Event Duration (2, 3, 4 Days) Policy</button>
-        <button type="button" class="ai-opt-btn" id="ai-opt-support">📞 Contact Event Organizers</button>
+      <div class="ai-chat-body">
+        <p>Assalam-o-Alaikum! Welcome to the <strong>CAIPSD Event Portal</strong>. How can I assist you?</p>
+        <div class="ai-chat-options">
+          <button type="button" class="ai-opt-btn" id="ai-opt-checkin">⌗ Gate Check-in &amp; Scanner</button>
+          <button type="button" class="ai-opt-btn" id="ai-opt-login">🔐 Organizer Workspace Login</button>
+          <button type="button" class="ai-opt-btn" id="ai-opt-rules">📅 Event Duration Policy</button>
+          <button type="button" class="ai-opt-btn" id="ai-opt-support">📞 Contact Event Organizers</button>
+        </div>
+        <div id="ai-chat-answer" class="ai-chat-answer" style="display:none;"></div>
       </div>
-      <div id="ai-chat-answer" class="ai-chat-answer" style="display:none;"></div>
     </div>
   </div>
 
+  <!-- Admin SaaS Workspace (Distraction-Free) -->
   <div id="admin-app" class="admin-app" hidden>
     <aside class="sidebar" id="sidebar">
-      <a class="sidebar-brand" href="index.html">
+      <div class="sidebar-brand">
         <img src="assets/caipsd-logo-white.png" alt="CAIPSD Logo" class="sidebar-logo-img" />
-      </a>
+      </div>
       <div class="sidebar-section-label">WORKSPACE</div>
       <nav class="sidebar-nav">
         <button class="nav-item active" data-view="overview"><span class="nav-icon">▦</span>Overview</button>
-        <button class="nav-item" data-view="tickets"><span class="nav-icon">♙</span>Tickets</button>
+        <button class="nav-item" data-view="tickets"><span class="nav-icon">🎟</span>Tickets Manager</button>
+        <button class="nav-item" id="sidebar-gate-btn"><span class="nav-icon">⌗</span>Gate Scanner</button>
+        <button class="nav-item" id="sidebar-duration-btn"><span class="nav-icon">⚙</span>Event Duration</button>
       </nav>
       <div class="sidebar-bottom">
-        <div class="sidebar-help">
-          <img src="assets/caipsd-mark.png" alt="CAIPSD AI" class="help-emblem" />
-          <div><strong>CAIPSD Portal</strong><small>The Islamia University of Bahawalpur</small></div>
-        </div>
+        <a href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener" class="sidebar-sheet-link" title="Open Google Sheet Database">
+          <span>📊</span> Live Google Sheet ↗
+        </a>
         <button id="logout-button" class="logout-button"><span>↪</span> Sign out</button>
       </div>
     </aside>
@@ -260,63 +253,122 @@
     <main class="admin-main">
       <header class="admin-topbar">
         <button class="mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button>
-        <div class="breadcrumb">CAIPSD <span>/</span> <strong id="breadcrumb-current">Overview</strong></div>
+        <div class="breadcrumb">CAIPSD Workspace <span>/</span> <strong id="breadcrumb-current">Overview</strong></div>
         <div class="topbar-right">
-          <button id="topbar-gate-btn" class="topbar-status topbar-btn" style="cursor: pointer; border: 1px solid rgba(43,95,220,0.15); background: #ffffff; color: inherit; padding: 0.3rem 0.75rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem; font-family: inherit;" title="Switch to Entrance Gate Check-in"><i style="background: #22c55e;"></i> <span>Gate Check-in</span></button>
-          <button id="topbar-duration-btn" class="topbar-status topbar-btn" style="cursor: pointer; border: 1px solid rgba(43,95,220,0.25); background: #ffffff; color: #1c304e; padding: 0.3rem 0.75rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem; font-family: inherit;" title="Change Event Duration (2, 3, 4 days)"><i style="background: #2b5fdc;"></i> <span>Event: <strong id="topbar-days-label">2 Days</strong> ⚙</span></button>
-          <a href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener" class="topbar-status" style="text-decoration: none; color: inherit; background: rgba(43,95,220,0.08); padding: 0.3rem 0.7rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem;" title="Open permanent Google Sheet"><i style="background: #22c55e;"></i> Google Sheet Live ↗</a>
-          <span class="topbar-status"><i></i> System active</span>
-          <div class="admin-avatar" id="admin-avatar"><img src="assets/caipsd-mark.png" alt="Admin" class="avatar-img" /></div>
-          <div class="admin-user"><strong>Administrator</strong><small id="admin-email">admin@caipsd.org</small></div>
+          <button id="topbar-gate-btn" class="topbar-btn topbar-btn-scanner" title="Switch to Entrance Gate Check-in">
+            <i></i> <span>⌗ Gate Check-in</span>
+          </button>
+          <button id="topbar-duration-btn" class="topbar-btn topbar-btn-duration" title="Change Event Duration (2, 3, 4 days)">
+            <i></i> <span>Duration: <strong id="topbar-days-label">2 Days</strong> ⚙</span>
+          </button>
+          <a href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener" class="topbar-btn topbar-btn-sheet" title="Open permanent Google Sheet">
+            <i></i> <span>Live Sheet ↗</span>
+          </a>
+          <div class="admin-chip">
+            <div class="admin-avatar" id="admin-avatar">A</div>
+            <div class="admin-chip-info">
+              <strong id="admin-email">admin@caipsd.org</strong>
+              <small>Organizer</small>
+            </div>
+          </div>
         </div>
       </header>
       <div class="admin-content">
         <section class="view-section active" id="view-overview">
-          <div class="page-heading"><div><div class="admin-kicker">YOUR EVENT AT A GLANCE</div><h1>Good to see you.</h1><p>Issue tickets, track gate check-ins and keep the event running smoothly.</p></div><div style="display:flex; gap:8px;"><button class="admin-button admin-button-secondary" id="overview-bulk-btn">＋ Bulk issue</button><button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue ticket</button></div></div>
+          <div class="page-heading">
+            <div>
+              <div class="admin-kicker">YOUR EVENT AT A GLANCE</div>
+              <h1>Good to see you.</h1>
+              <p>Issue tickets, track gate check-ins and keep the event running smoothly.</p>
+            </div>
+            <div class="heading-actions">
+              <button class="admin-button admin-button-secondary" id="overview-bulk-btn">＋ Bulk Issue</button>
+              <button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue Ticket</button>
+            </div>
+          </div>
           <div class="stats-grid">
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-blue">▤</span><span class="stat-caption">TICKETS ISSUED</span></div><strong id="stat-total">—</strong><small>Total registered participants</small></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-purple">✓</span><span class="stat-caption">DAY 1 ENTERED</span></div><strong id="stat-day1">—</strong><small>Day 1 check-in scans</small></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-green">✓✓</span><span class="stat-caption">DAY 2 ENTERED</span></div><strong id="stat-day2">—</strong><small>Day 2 check-in scans</small></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-orange">◷</span><span class="stat-caption">NOT YET ENTERED</span></div><strong id="stat-awaiting">—</strong><small id="stat-expired-note">Awaiting check-in</small></article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon stat-icon-blue">🎟</span><span class="stat-caption">TICKETS ISSUED</span></div>
+              <strong id="stat-total">—</strong>
+              <small>Total registered participants</small>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon stat-icon-purple">✓</span><span class="stat-caption">DAY 1 ENTERED</span></div>
+              <strong id="stat-day1">—</strong>
+              <small>Day 1 check-in scans</small>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon stat-icon-green">✓✓</span><span class="stat-caption">DAY 2+ ENTERED</span></div>
+              <strong id="stat-day2">—</strong>
+              <small>Day 2+ check-in scans</small>
+            </article>
+            <article class="stat-card">
+              <div class="stat-top"><span class="stat-icon stat-icon-orange">◷</span><span class="stat-caption">NOT YET ENTERED</span></div>
+              <strong id="stat-awaiting">—</strong>
+              <small id="stat-expired-note">Awaiting entrance check-in</small>
+            </article>
           </div>
           <div class="dashboard-grid">
             <section class="panel quick-panel">
-              <div class="panel-heading"><div><h2>Quick actions</h2><p>Common event tasks</p></div></div>
-              <button class="quick-action" data-action="new-ticket"><span class="quick-icon">＋</span><span><strong>Issue single ticket</strong><small>Generate instant QR ticket by participant name</small></span><b>→</b></button>
-              <button class="quick-action" id="quick-bulk-tickets"><span class="quick-icon quick-icon-blue">＋＋</span><span><strong>Bulk issue tickets (Names list)</strong><small>Paste student names and generate all tickets at once</small></span><b>→</b></button>
-              <button class="quick-action" id="quick-open-gate"><span class="quick-icon quick-icon-green">⌗</span><span><strong>Gate Check-in (Front Entrance)</strong><small>Switch to entrance QR scanner</small></span><b>→</b></button>
-              <a class="quick-action" href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener"><span class="quick-icon quick-icon-blue">📊</span><span><strong>Google Sheet Database ↗</strong><small>Live auto-sync attached</small></span><b>↗</b></a>
-              <button class="quick-action" id="quick-export"><span class="quick-icon quick-icon-purple">⇩</span><span><strong>Export ticket list</strong><small>Download a CSV report</small></span><b>→</b></button>
+              <div class="panel-heading"><div><h2>Event Controls</h2><p>Operational shortcuts</p></div></div>
+              <button class="quick-action" id="quick-open-gate"><span class="quick-icon quick-icon-green">⌗</span><span><strong>Open Gate Scanner</strong><small>Switch to entrance camera QR scanner</small></span><b>→</b></button>
+              <button class="quick-action" id="quick-duration-action"><span class="quick-icon quick-icon-blue">⚙</span><span><strong>Event Duration (Days)</strong><small>Set ticket validity duration (2, 3, 4 days)</small></span><b>→</b></button>
+              <a class="quick-action" href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener"><span class="quick-icon quick-icon-blue">📊</span><span><strong>Google Sheet Database ↗</strong><small>Live auto-sync records</small></span><b>↗</b></a>
+              <button class="quick-action" id="quick-export"><span class="quick-icon quick-icon-purple">⇩</span><span><strong>Export All Tickets (CSV)</strong><small>Download attendance spreadsheet report</small></span><b>→</b></button>
             </section>
             <section class="panel workshop-overview-panel">
-              <div class="panel-heading"><div><h2>Gate check-in policy</h2><p>Daily entrance rules</p></div></div>
-              <div class="mail-status" style="padding: 1rem 1.25rem;">
-                <div style="display:flex; flex-direction:column; gap:14px; font-size:0.86rem; line-height:1.55; color:#334155;">
-                  <div style="display:flex; align-items:flex-start; gap:10px;">
-                    <span style="background:rgba(43,95,220,0.12); color:#2b5fdc; font-weight:700; padding:2px 8px; border-radius:6px; font-size:0.75rem;">DAY 1</span>
-                    <div><strong>1 Scan allowed on Day 1.</strong> Repeat scans on the same calendar day are automatically blocked at the entrance.</div>
-                  </div>
-                  <div style="display:flex; align-items:flex-start; gap:10px;">
-                    <span style="background:rgba(34,197,94,0.12); color:#16a34a; font-weight:700; padding:2px 8px; border-radius:6px; font-size:0.75rem;">DAY 2</span>
-                    <div><strong>1 Scan allowed on Day 2.</strong> Repeat scans on Day 2 are blocked.</div>
-                  </div>
-                  <div style="display:flex; align-items:flex-start; gap:10px;">
-                    <span style="background:rgba(239,68,68,0.12); color:#dc2626; font-weight:700; padding:2px 8px; border-radius:6px; font-size:0.75rem;">LIMIT</span>
-                    <div><strong>Total 2 entries maximum.</strong> Each ticket pass covers both event days.</div>
-                  </div>
+              <div class="panel-heading"><div><h2>Gate check-in rules</h2><p>Active entrance verification policy</p></div></div>
+              <div class="policy-box">
+                <div class="policy-item">
+                  <span class="policy-badge badge-blue">DAILY LIMIT</span>
+                  <div><strong>1 Scan allowed per calendar day.</strong> Repeat scans on the same calendar day are automatically blocked at the entrance.</div>
+                </div>
+                <div class="policy-item">
+                  <span class="policy-badge badge-green">DURATION</span>
+                  <div><strong>Multi-day pass (<span class="dyn-policy-days">2 Days</span>).</strong> Each ticket can be used across up to <span class="dyn-policy-days">2 Days</span> of the event.</div>
+                </div>
+                <div class="policy-item">
+                  <span class="policy-badge badge-red">PROTECTION</span>
+                  <div><strong>Anti-fraud check.</strong> Expired tickets or tickets that reached their scan limit are rejected with audio/visual feedback.</div>
                 </div>
               </div>
             </section>
           </div>
-          <section class="panel recent-panel"><div class="panel-heading"><div><h2>Recent tickets</h2><p>Latest tickets issued</p></div><button class="subtle-link" data-view-link="tickets">View all →</button></div><div id="recent-tickets" class="table-wrap"><div class="table-loading">Loading tickets…</div></div></section>
+          <section class="panel recent-panel">
+            <div class="panel-heading"><div><h2>Recent tickets</h2><p>Latest tickets issued</p></div><button class="subtle-link" data-view-link="tickets">View all →</button></div>
+            <div id="recent-tickets" class="table-wrap"><div class="table-loading">Loading tickets…</div></div>
+          </section>
         </section>
 
         <section class="view-section" id="view-tickets">
-          <div class="page-heading"><div><div class="admin-kicker">TICKET DESK</div><h1>Tickets.</h1><p>Every ticket you issue is saved here and tied to one participant.</p></div><div class="heading-actions"><button class="admin-button admin-button-secondary" id="export-csv">↓ Export CSV</button><button class="admin-button admin-button-primary" id="btn-bulk-tickets" style="background:#0284c7; border-color:#0284c7;">＋ Bulk issue (Names)</button><button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue ticket</button></div></div>
-          <section class="panel full-panel"><div class="filter-bar"><div class="search-box"><span>⌕</span><input id="search-tickets" type="search" placeholder="Search name, email, phone or ticket ID…"></div><select id="filter-status"><option value="">All tickets</option><option value="valid">Valid — not entered</option><option value="checked_in">Entered</option><option value="expired">Expired</option></select></div><div id="tickets-table" class="table-wrap"><div class="table-loading">Loading tickets…</div></div><div class="table-footnote">Showing up to 500 most recent tickets.</div></section>
+          <div class="page-heading">
+            <div>
+              <div class="admin-kicker">TICKET DESK</div>
+              <h1>Tickets Manager.</h1>
+              <p>Every ticket you issue is saved here and tied to one participant.</p>
+            </div>
+            <div class="heading-actions">
+              <button class="admin-button admin-button-secondary" id="export-csv">↓ Export CSV</button>
+              <button class="admin-button admin-button-secondary" id="btn-bulk-tickets">＋ Bulk Issue</button>
+              <button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue Ticket</button>
+            </div>
+          </div>
+          <section class="panel full-panel">
+            <div class="filter-bar">
+              <div class="search-box"><span>⌕</span><input id="search-tickets" type="search" placeholder="Search name or ticket ID…"></div>
+              <select id="filter-status">
+                <option value="">All tickets</option>
+                <option value="valid">Valid — not entered</option>
+                <option value="checked_in">Entered</option>
+                <option value="expired">Expired</option>
+              </select>
+            </div>
+            <div id="tickets-table" class="table-wrap"><div class="table-loading">Loading tickets…</div></div>
+            <div class="table-footnote">Showing up to 500 most recent tickets.</div>
+          </section>
         </section>
       </div>
-      <footer class="admin-footer"><span>© <span id="admin-year"></span> CAIPSD Event Portal</span><span>ORGANIZER WORKSPACE</span></footer>
+      <footer class="admin-footer"><span>© <span id="admin-year"></span> CAIPSD Event Management</span><span>THE ISLAMIA UNIVERSITY OF BAHAWALPUR</span></footer>
     </main>
   </div>
 

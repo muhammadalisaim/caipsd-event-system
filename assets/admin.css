@@ -1159,3 +1159,187 @@
     height: 50px;
   }
 }
+
+/* ---- Clean & Professional Workspace Dashboard Elements ---- */
+.sidebar {
+  background: #0f1f38 !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  width: 240px;
+  padding: 20px 14px 14px;
+}
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 18px;
+}
+.sidebar-logo-img {
+  max-height: 38px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+.sidebar-sheet-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 6px;
+  transition: all 0.15s ease;
+}
+.sidebar-sheet-link:hover {
+  background: rgba(37, 99, 235, 0.15);
+  color: #ffffff;
+  border-color: rgba(37, 99, 235, 0.3);
+}
+
+.admin-topbar {
+  height: 64px !important;
+  padding: 0 32px !important;
+  background: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.breadcrumb {
+  font-size: 13.5px !important;
+  color: #64748b;
+  font-weight: 500;
+}
+.breadcrumb strong {
+  color: #0f172a !important;
+  font-weight: 700;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.topbar-btn {
+  cursor: pointer;
+  padding: 6px 14px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 12.5px;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+.topbar-btn-scanner {
+  background: #f0fdf4;
+  color: #15803d;
+  border-color: #bbf7d0;
+}
+.topbar-btn-scanner i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+}
+.topbar-btn-scanner:hover {
+  background: #dcfce7;
+}
+.topbar-btn-duration {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+.topbar-btn-duration i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2563eb;
+}
+.topbar-btn-duration:hover {
+  background: #dbeafe;
+}
+.topbar-btn-sheet {
+  background: #f8fafc;
+  color: #334155;
+  border-color: #e2e8f0;
+}
+.topbar-btn-sheet i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+}
+.topbar-btn-sheet:hover {
+  background: #f1f5f9;
+}
+.admin-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px 4px 4px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  margin-left: 6px;
+}
+.admin-chip .admin-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 12px;
+}
+.admin-chip-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.admin-chip-info strong {
+  font-size: 12px;
+  color: #0f172a;
+}
+.admin-chip-info small {
+  font-size: 10px;
+  color: #64748b;
+}
+
+/* Policy card in dashboard */
+.policy-box {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.policy-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+}
+.policy-badge {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.badge-blue { background: #dbeafe; color: #1d4ed8; }
+.badge-green { background: #dcfce7; color: #15803d; }
+.badge-red { background: #fee2e2; color: #b91c1c; }
