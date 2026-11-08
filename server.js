@@ -284,7 +284,8 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
     let ticket = getTicketById(Number(result.lastInsertRowid));
 
     const wantsEmail = req.body.sendEmail !== false && req.body.sendEmail !== 'false';
-    const emailResult = wantsEmail && mailConfigured() ? await emailTicket(ticket) : { status: 'not_sent', skipped: wantsEmail ? 'not_configured' : 'declined' };
+    const emailConfigured = mailConfigured() || Boolean(getSheetsConfig().webhookUrl);
+    const emailResult = wantsEmail && emailConfigured ? await emailTicket(ticket) : { status: 'not_sent', skipped: wantsEmail ? 'not_configured' : 'declined' };
     ticket = getTicketById(ticket.id);
 
     // Auto-sync ticket to Google Sheet in background
@@ -299,7 +300,7 @@ app.post('/api/admin/tickets/:id/send', requireAdmin, async (req, res, next) => 
     const id = Number(req.params.id);
     const ticket = Number.isInteger(id) ? getTicketById(id) : null;
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
-    if (!mailConfigured()) return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
+    if (!mailConfigured() && !getSheetsConfig().webhookUrl) return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
     const result = await emailTicket(ticket);
     const updated = serializeTicket(getTicketById(id));
     sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
@@ -310,7 +311,7 @@ app.post('/api/admin/tickets/:id/send', requireAdmin, async (req, res, next) => 
 
 app.post('/api/admin/tickets/email-all', requireAdmin, async (req, res, next) => {
   try {
-    if (!mailConfigured()) {
+    if (!mailConfigured() && !getSheetsConfig().webhookUrl) {
       return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
     }
     const mode = req.body && req.body.mode === 'all' ? 'all' : 'pending';

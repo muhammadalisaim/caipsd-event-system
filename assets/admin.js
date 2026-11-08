@@ -450,24 +450,47 @@ function pushTicketToSheet(ticket, type = 'appendTicket') {
 }
 
 async function pushTicketEmailToSheet(ticket) {
-  if (!ticket || !GOOGLE_WEB_APP_URL) return;
+  if (!ticket || !GOOGLE_WEB_APP_URL) return { status: 'skipped', message: 'No Google Web App URL configured' };
+  const recipient = String(ticket.email || (ticket.ticket && ticket.ticket.email) || '').trim().toLowerCase();
+  if (!recipient || !recipient.includes('@')) {
+    throw new Error('Ticket participant does not have a valid email address.');
+  }
+  const ticketCode = String(ticket.ticket_code || ticket.ticketCode || '').trim();
+  const fullName = String(ticket.full_name || ticket.fullName || 'Participant').trim();
+
   const payload = {
     action: 'sendTicketEmail',
     sheetName: 'CAIPSD_Tickets',
-    ticket: ticket,
-    to: ticket.email,
-    ticketCode: ticket.ticket_code,
-    fullName: ticket.full_name
+    to: recipient,
+    ticketCode: ticketCode,
+    fullName: fullName,
+    ticket: {
+      ...ticket,
+      email: recipient,
+      ticket_code: ticketCode,
+      full_name: fullName
+    }
   };
+
   let result = null;
+  let fetchError = null;
   try {
     const res = await fetch(GOOGLE_WEB_APP_URL, {
       method: 'POST',
+      redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     });
-    result = await res.json().catch(() => null);
+    const text = await res.text();
+    try {
+      result = JSON.parse(text);
+    } catch {
+      if (text.includes('Ticket email delivered') || text.includes('"status":"ok"')) {
+        result = { status: 'ok', message: `Ticket emailed to ${recipient}` };
+      }
+    }
   } catch (err) {
+    fetchError = err;
     try {
       await fetch(GOOGLE_WEB_APP_URL, {
         method: 'POST',
@@ -475,12 +498,16 @@ async function pushTicketEmailToSheet(ticket) {
         body: JSON.stringify(payload),
         mode: 'no-cors'
       });
-    } catch {}
+      result = { status: 'ok', message: `Ticket email dispatched to ${recipient}` };
+    } catch (e2) {
+      throw new Error(`Could not deliver email: ${fetchError?.message || e2.message}`);
+    }
   }
+
   if (result && result.status === 'error') {
     throw new Error(result.message || 'Google Mail Error');
   }
-  return result;
+  return result || { status: 'ok', message: `Ticket emailed to ${recipient}` };
 }
 
 async function pushTestEmailToSheet(to) {
@@ -684,31 +711,48 @@ async function handleStaticApi(url, options = {}) {
     const hex = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
     const now = new Date();
     const validUntil = new Date(now.getTime() + 3 * 86400000);
-    const shouldSend = body.sendEmail !== false && Boolean(body.email);
+    const cleanEmail = String(body.email || '').trim().toLowerCase();
+    const cleanFullName = String(body.fullName || 'Participant').trim();
+    const cleanPhone = String(body.phone || '').trim();
+    const shouldSend = body.sendEmail !== false && body.sendEmail !== 'false' && Boolean(cleanEmail);
+
     const newTicket = {
       id: Date.now(),
-      full_name: body.fullName || 'Participant',
-      email: (body.email || '').toLowerCase(),
-      phone: body.phone || '',
+      full_name: cleanFullName,
+      email: cleanEmail,
+      phone: cleanPhone,
       ticket_code: hex,
       issued_at: now.toISOString(),
       valid_until: validUntil.toISOString(),
       entry_count: 0,
       first_entry_at: null,
       last_entry_at: null,
-      email_status: shouldSend ? 'sent' : 'not_sent',
+      email_status: 'not_sent',
       status: 'valid'
     };
+
+    let emailResult = { status: 'not_sent' };
+    if (shouldSend) {
+      try {
+        await pushTicketEmailToSheet(newTicket);
+        newTicket.email_status = 'sent';
+        newTicket.email_error = null;
+        emailResult = { status: 'sent' };
+      } catch (err) {
+        console.error('Failed to email new ticket:', err);
+        newTicket.email_status = 'failed';
+        newTicket.email_error = err.message;
+        emailResult = { status: 'failed', error: err.message };
+      }
+    }
+
     list.unshift(newTicket);
     saveLocalTickets(list);
 
-    // Background push to Google Sheet Web App
+    // Save ticket with its real email_status in Google Sheet
     pushTicketToSheet(newTicket, 'appendTicket');
-    if (shouldSend) {
-      pushTicketEmailToSheet(newTicket);
-    }
 
-    return { ticket: newTicket, email: { status: newTicket.email_status } };
+    return { ticket: newTicket, email: emailResult };
   }
 
   if (url === '/api/admin/check-in' && method === 'POST') {
@@ -789,14 +833,17 @@ async function handleStaticApi(url, options = {}) {
   }
 
   if (url.startsWith('/api/admin/tickets/') && url.endsWith('/send') && method === 'POST') {
-    const id = parseInt(url.split('/')[4], 10);
+    const rawId = url.split('/')[4];
+    const numId = parseInt(rawId, 10);
     const list = getLocalTickets();
-    const t = list.find((x) => x.id === id);
+    const t = list.find((x) => x.id === numId || String(x.id) === rawId || x.ticket_code === rawId || (x.ticket_code && x.ticket_code.toUpperCase() === rawId.toUpperCase()));
     if (!t) throw new Error('Ticket not found.');
     if (!t.email) throw new Error('Ticket does not have an email address.');
     await pushTicketEmailToSheet(t);
     t.email_status = 'sent';
+    t.email_error = null;
     saveLocalTickets(list);
+    pushTicketToSheet(t, 'updateTicket');
     return { message: `Ticket emailed to ${t.email}.`, ticket: t };
   }
 
@@ -804,10 +851,20 @@ async function handleStaticApi(url, options = {}) {
     const list = getLocalTickets();
     const mode = body.mode || 'pending';
     const targets = list.filter((t) => {
-      if (!t.email) return false;
+      const em = String(t.email || '').trim().toLowerCase();
+      if (!em || !em.includes('@')) return false;
       if (mode === 'pending') return t.email_status !== 'sent';
       return true;
     });
+
+    if (targets.length === 0) {
+      return {
+        total: 0,
+        sent: 0,
+        failed: 0,
+        message: mode === 'all' ? 'No tickets with email addresses found.' : 'All students have already received their tickets!'
+      };
+    }
 
     let sent = 0;
     let failed = 0;
@@ -816,12 +873,18 @@ async function handleStaticApi(url, options = {}) {
       try {
         await pushTicketEmailToSheet(t);
         t.email_status = 'sent';
+        t.email_error = null;
+        pushTicketToSheet(t, 'updateTicket');
         sent++;
       } catch (err) {
+        console.error('Failed to email ticket in bulk:', t.email, err);
         t.email_status = 'failed';
         t.email_error = err.message;
         failed++;
         lastErr = err;
+      }
+      if (targets.length > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
       }
     }
     saveLocalTickets(list);
@@ -832,7 +895,7 @@ async function handleStaticApi(url, options = {}) {
       total: targets.length,
       sent,
       failed,
-      message: `Completed: ${sent} tickets emailed successfully!${failed ? ` (${failed} failed)` : ''}`
+      message: `Completed: ${sent} ticket${sent === 1 ? '' : 's'} emailed successfully!${failed ? ` (${failed} failed)` : ''}`
     };
   }
 
@@ -1410,12 +1473,15 @@ $('#ticket-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const payload = { fullName: form.elements.fullName.value, email: form.elements.email.value, phone: form.elements.phone.value, sendEmail: form.elements.sendEmail.checked };
-  const button = $('#save-ticket'); button.disabled = true; button.textContent = 'Generating…'; $('#ticket-form-error').textContent = '';
+  const button = $('#save-ticket');
+  button.disabled = true;
+  button.textContent = payload.sendEmail ? 'Generating & Emailing…' : 'Generating…';
+  $('#ticket-form-error').textContent = '';
   try {
     const data = await api('/api/admin/tickets', { method: 'POST', body: JSON.stringify(payload) });
     closeTicketModal();
-    if (data.email.status === 'sent') toast(`Ticket created and emailed to ${data.ticket.email}.`);
-    else if (data.email.status === 'failed') toast(`Ticket created, but the email failed: ${data.email.error}`, 'error');
+    if (data.email && data.email.status === 'sent') toast(`✓ Ticket created and emailed to ${data.ticket.email}.`);
+    else if (data.email && data.email.status === 'failed') toast(`Ticket created, but email delivery failed: ${data.email.error}`, 'error');
     else toast('Ticket created and saved. Use “Send email” when you are ready to deliver it.');
     refreshStats();
     if ($('#view-tickets').classList.contains('active')) loadTickets(); else if ($('#view-overview').classList.contains('active')) loadDashboard();

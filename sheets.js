@@ -535,12 +535,12 @@ function doPost(e) {
 
     if (action === 'sendTicketEmail' || action === 'sendEmail') {
       var t = payload.ticket || {};
-      var recipient = payload.to || t.email;
-      if (!recipient) {
-        return respondJson({ status: 'error', message: 'Missing recipient email' });
+      var recipient = String(payload.to || t.email || '').trim().toLowerCase();
+      if (!recipient || recipient.indexOf('@') === -1) {
+        return respondJson({ status: 'error', message: 'Missing or invalid recipient email: ' + recipient });
       }
-      var ticketCode = t.ticket_code || payload.ticketCode || '';
-      var name = t.full_name || payload.fullName || 'Participant';
+      var ticketCode = String(payload.ticketCode || t.ticket_code || '').trim();
+      var name = String(payload.fullName || t.full_name || 'Participant').trim();
       var validUntil = t.valid_until || '';
       var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=' + encodeURIComponent(ticketCode);
       var viewLink = 'https://muhammadalisaim.github.io/caipsd-event-system/ticket.html?code=' + encodeURIComponent(ticketCode);
@@ -574,17 +574,33 @@ function doPost(e) {
           subject: 'Your CAIPSD Event Pass - ' + ticketCode,
           htmlBody: html
         });
+
+        if (ticketCode) {
+          var rIdx = findRowByTicketCode(sheet, ticketCode);
+          if (rIdx > 0) {
+            sheet.getRange(rIdx, 11).setValue('sent');
+          }
+        }
+
         return respondJson({ status: 'ok', message: 'Ticket email delivered to ' + recipient });
       } catch (err) {
-        return respondJson({
-          status: 'error',
-          message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
-        });
+        var errMsg = err.message || err.toString();
+        if (errMsg.indexOf('permission') !== -1 || errMsg.indexOf('MailApp') !== -1) {
+          errMsg = 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".';
+        }
+        return respondJson({ status: 'error', message: errMsg });
       }
     }
 
     if (action === 'sendTestEmail') {
-      var to = payload.to || (payload.ticket && payload.ticket.email) || ss.getOwner().getEmail();
+      var to = String(payload.to || (payload.ticket && payload.ticket.email) || '').trim().toLowerCase();
+      if (!to) {
+        try {
+          to = Session.getActiveUser().getEmail() || ss.getOwner().getEmail() || 'saimmalik4728@gmail.com';
+        } catch (eUser) {
+          to = 'saimmalik4728@gmail.com';
+        }
+      }
       try {
         MailApp.sendEmail({
           to: to,
@@ -598,10 +614,11 @@ function doPost(e) {
         });
         return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
       } catch (err) {
-        return respondJson({
-          status: 'error',
-          message: 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".'
-        });
+        var errTestMsg = err.message || err.toString();
+        if (errTestMsg.indexOf('permission') !== -1 || errTestMsg.indexOf('MailApp') !== -1) {
+          errTestMsg = 'Google Mail Permission Required: In your Google Sheet, click Extensions > Apps Script, select "authorizeAndSendTestEmail" from top dropdown and click "Run" (▶️), then click "Allow".';
+        }
+        return respondJson({ status: 'error', message: errTestMsg });
       }
     }
 
