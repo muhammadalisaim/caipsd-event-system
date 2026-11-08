@@ -220,35 +220,42 @@ function doPost(e) {
 
     if (action === 'syncAll') {
       var headers = payload.headers || [
-        'Ticket ID', 'Full Name', 'Email', 'Phone', 'Issued At',
-        'Valid Until', 'Status', 'Entries', 'First Entry', 'Last Entry', 'Email Status'
+        'Ticket ID', 'Full Name', 'Issued At', 'Valid Until', 'Status', 'Entries', 'First Entry', 'Last Entry'
       ];
       var rows = payload.rows || [];
 
       sheet.clearContents();
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1c304e').setFontColor('#FFFFFF');
+      sheet.getRange(1, 1, 1, headers.length)
+        .setFontWeight('bold')
+        .setBackground('#0d1930')
+        .setFontColor('#FFFFFF')
+        .setHorizontalAlignment('center');
+      sheet.getRange(1, 2).setHorizontalAlignment('left');
+      sheet.setRowHeight(1, 38);
       sheet.setFrozenRows(1);
 
       if (rows.length > 0) {
         sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
       }
+      formatAndAlignSheet();
       return respondJson({ status: 'ok', message: 'Successfully synced ' + rows.length + ' tickets to Google Sheet.', count: rows.length });
     }
 
     if (action === 'appendTicket' || action === 'append') {
       ensureHeaders(sheet, payload.headers);
       var row = payload.row;
-      if (!row && payload.ticket) {
+      if (payload.ticket && (!row || row.length !== sheet.getLastColumn())) {
         row = buildRowForTicket(sheet, payload.ticket);
       }
       if (row && row.length) {
-        var code = row[0];
+        var code = String(row[0] || '').replace(/^'/, '').trim().toUpperCase();
         var existingRowIndex = findRowByTicketCode(sheet, code);
+        var cols = Math.min(row.length, sheet.getLastColumn());
         if (existingRowIndex > 0) {
-          sheet.getRange(existingRowIndex, 1, 1, row.length).setValues([row]);
+          sheet.getRange(existingRowIndex, 1, 1, cols).setValues([row.slice(0, cols)]);
         } else {
-          sheet.appendRow(row);
+          sheet.appendRow(row.slice(0, cols));
         }
       }
       return respondJson({ status: 'ok', message: 'Ticket saved in Google Sheet.' });
@@ -257,16 +264,17 @@ function doPost(e) {
     if (action === 'updateTicket' || action === 'update') {
       var ticketCode = payload.ticketCode || (payload.ticket && payload.ticket.ticket_code);
       var updatedRow = payload.row;
-      if (!updatedRow && payload.ticket) {
+      if (payload.ticket && (!updatedRow || updatedRow.length !== sheet.getLastColumn())) {
         updatedRow = buildRowForTicket(sheet, payload.ticket);
       }
       if (ticketCode && updatedRow) {
         var rowIndex = findRowByTicketCode(sheet, ticketCode);
+        var cols = Math.min(updatedRow.length, sheet.getLastColumn());
         if (rowIndex > 0) {
-          sheet.getRange(rowIndex, 1, 1, updatedRow.length).setValues([updatedRow]);
+          sheet.getRange(rowIndex, 1, 1, cols).setValues([updatedRow.slice(0, cols)]);
           return respondJson({ status: 'ok', message: 'Row updated.' });
         } else {
-          sheet.appendRow(updatedRow);
+          sheet.appendRow(updatedRow.slice(0, cols));
           return respondJson({ status: 'ok', message: 'Row appended.' });
         }
       }

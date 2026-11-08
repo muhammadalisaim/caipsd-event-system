@@ -69,8 +69,9 @@ function saveSheetsConfig(data) {
 }
 
 function ticketToRow(t) {
+  const code = t.ticket_code ? `'${String(t.ticket_code).replace(/^'/, '')}` : '';
   return [
-    t.ticket_code || '',
+    code,
     t.full_name || '',
     t.issued_at || '',
     t.valid_until || '',

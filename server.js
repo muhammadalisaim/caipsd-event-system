@@ -284,8 +284,18 @@ app.post('/api/admin/logout', requireAdmin, (req, res) => req.session.destroy((e
 }));
 
 app.get('/api/admin/config', requireAdmin, (req, res) => {
+  const mailCfg = getMailConfig();
   res.json({
     validDays: getDefaultValidDays(),
+    mail: {
+      configured: emailAvailable(),
+      channel: emailChannel(),
+      smtpConfigured: mailConfigured(),
+      from: mailConfigured() ? fromAddress() : null,
+      user: mailCfg.user || null,
+      fromName: mailCfg.fromName,
+      isGmail: !mailCfg.host || mailCfg.host.includes('gmail')
+    },
     sheets: getSheetsConfig()
   });
 });
@@ -345,12 +355,17 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
     const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
     const result = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(fullName, email || '', phone || '', ticketCode, issued.toISOString(), validUntil.toISOString(), days);
-    const ticket = getTicketById(Number(result.lastInsertRowid));
+    let ticket = getTicketById(Number(result.lastInsertRowid));
+
+    const wantsEmail = req.body.sendEmail !== false && req.body.sendEmail !== 'false' && Boolean(email);
+    const emailConfigured = emailAvailable();
+    const emailResult = wantsEmail && emailConfigured ? await emailTicket(ticket) : { status: 'not_sent', skipped: wantsEmail ? 'not_configured' : 'declined' };
+    ticket = getTicketById(ticket.id);
 
     // Auto-sync ticket to Google Sheet in background
     sheetsAppendTicket(serializeTicket(ticket)).catch((err) => console.error('Sheet append error:', err.message));
 
-    res.status(201).json({ ticket: serializeTicket(ticket) });
+    res.status(201).json({ ticket: serializeTicket(ticket), email: emailResult });
   } catch (error) { next(error); }
 });
 
@@ -382,9 +397,9 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
       }
     })();
 
-    for (const t of createdTickets) {
-      sheetsAppendTicket(serializeTicket(t)).catch(() => {});
-    }
+    // Auto-sync all tickets to Google Sheet in one clean batch
+    const allCurrentTickets = db.prepare('SELECT * FROM tickets ORDER BY id ASC').all().map(serializeTicket);
+    syncAllTickets(allCurrentTickets).catch((err) => console.error('Sheet bulk syncAll error:', err.message));
 
     res.status(201).json({
       message: `Successfully issued ${createdTickets.length} ticket${createdTickets.length === 1 ? '' : 's'} (${days} day${days === 1 ? '' : 's'} pass).`,
@@ -395,12 +410,54 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post('/api/admin/tickets/:id/send', requireAdmin, (req, res) => {
-  res.json({ message: 'Email system is disabled. Tickets are issued by name from the portal.' });
+app.post('/api/admin/tickets/:id/send', requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const ticket = Number.isInteger(id) ? getTicketById(id) : null;
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    if (!emailAvailable()) return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
+    const result = await emailTicket(ticket);
+    const updated = serializeTicket(getTicketById(id));
+    sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
+    if (result.status === 'failed') return res.status(502).json({ error: `Email could not be sent: ${result.error}`, ticket: updated });
+    res.json({ message: `Ticket emailed to ${ticket.email}.`, ticket: updated });
+  } catch (error) { next(error); }
 });
 
-app.post('/api/admin/tickets/email-all', requireAdmin, (req, res) => {
-  res.json({ message: 'Email system is disabled. Tickets are issued by name from the portal.', total: 0, sent: 0, failed: 0 });
+app.post('/api/admin/tickets/email-all', requireAdmin, async (req, res, next) => {
+  try {
+    if (!emailAvailable()) {
+      return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
+    }
+    const mode = req.body && req.body.mode === 'all' ? 'all' : 'pending';
+    const tickets = mode === 'all'
+      ? db.prepare("SELECT * FROM tickets WHERE email != '' ORDER BY id ASC").all()
+      : db.prepare("SELECT * FROM tickets WHERE email != '' AND (email_status IS NULL OR email_status != 'sent') ORDER BY id ASC").all();
+
+    if (tickets.length === 0) {
+      return res.json({
+        total: 0,
+        sent: 0,
+        failed: 0,
+        message: mode === 'all' ? 'No tickets with email addresses found.' : 'All students have already received their tickets!'
+      });
+    }
+
+    let sent = 0;
+    let failed = 0;
+    for (const t of tickets) {
+      const r = await emailTicket(t);
+      if (r.status === 'sent') sent++;
+      else failed++;
+    }
+
+    res.json({
+      total: tickets.length,
+      sent,
+      failed,
+      message: `Delivered ${sent} ticket${sent === 1 ? '' : 's'}${failed ? ` (${failed} failed)` : ''}.`
+    });
+  } catch (error) { next(error); }
 });
 
 app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
@@ -462,7 +519,8 @@ async function handleCheckinRequest(req, res, next) {
     // 1. Total entries limit
     if (ticket.entry_count >= maxDays) {
       return res.status(409).json({
-        error: `Ticket limit reached: Yeh ticket pehle hi all ${maxDays} din (${maxDays} entries) use ho chuka hai.`,
+        error: `This ticket is already used! Yeh ticket pehle hi all ${maxDays} din (${maxDays} entries) use ho chuka hai.`,
+        alreadyUsed: true,
         limitReached: true,
         maxDays,
         ticket: serializeTicket(ticket)
@@ -476,7 +534,8 @@ async function handleCheckinRequest(req, res, next) {
 
     if (alreadyScannedToday) {
       return res.status(409).json({
-        error: 'Yeh ticket aaj pehle hi use ho chuka hai! 1 din mein sirf 1 baar entry allowed hai (Already used today).',
+        error: 'This ticket is already used today! 1 din mein sirf 1 baar entry allowed hai.',
+        alreadyUsed: true,
         alreadyScannedToday: true,
         maxDays,
         ticket: serializeTicket(ticket)

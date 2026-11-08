@@ -83,20 +83,22 @@ function extractTicketCode(raw) {
   return text.replace(/^(?:CAIPSD\|TICKET\|)?/i, '').trim().toUpperCase();
 }
 
+function getGoogleWebAppUrl() {
+  return localStorage.getItem('caipsd_sheets_webhook_url') || GOOGLE_WEB_APP_URL;
+}
+
 function pushTicketToSheet(ticket, type = 'appendTicket') {
-  if (!ticket || !GOOGLE_WEB_APP_URL) return;
+  const url = getGoogleWebAppUrl();
+  if (!ticket || !url) return;
   const row = [
     `'${ticket.ticket_code}`,
     ticket.full_name || '',
-    ticket.email || '',
-    ticket.phone || '',
     ticket.issued_at || '',
     ticket.valid_until || '',
     ticket.status || 'valid',
-    ticket.entry_count || 0,
+    ticket.entry_count != null ? ticket.entry_count : 0,
     ticket.first_entry_at || '',
-    ticket.last_entry_at || '',
-    ticket.email_status || 'not_sent'
+    ticket.last_entry_at || ''
   ];
   const payload = {
     action: type === 'append' ? 'appendTicket' : (type === 'update' ? 'updateTicket' : type),
@@ -106,7 +108,7 @@ function pushTicketToSheet(ticket, type = 'appendTicket') {
     row: row
   };
   try {
-    fetch(GOOGLE_WEB_APP_URL, {
+    fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload),
@@ -115,8 +117,51 @@ function pushTicketToSheet(ticket, type = 'appendTicket') {
   } catch {}
 }
 
+async function syncAllTicketsToSheet(tickets) {
+  const url = getGoogleWebAppUrl();
+  if (!url) return { status: 'skipped', message: 'No Google Web App URL configured' };
+  const rows = (tickets || []).map((t) => [
+    `'${t.ticket_code}`,
+    t.full_name || '',
+    t.issued_at || '',
+    t.valid_until || '',
+    t.status || 'valid',
+    t.entry_count != null ? t.entry_count : 0,
+    t.first_entry_at || '',
+    t.last_entry_at || ''
+  ]);
+  const payload = {
+    action: 'syncAll',
+    sheetName: 'CAIPSD_Tickets',
+    headers: ['Ticket ID', 'Full Name', 'Issued At', 'Valid Until', 'Status', 'Entries', 'First Entry', 'Last Entry'],
+    rows: rows
+  };
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    return await res.json();
+  } catch (err) {
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        mode: 'no-cors'
+      });
+      return { status: 'ok', message: `Synced ${rows.length} tickets to Google Sheet.` };
+    } catch (e2) {
+      console.warn('Sync to sheet failed:', e2);
+      return { status: 'error', message: err.message };
+    }
+  }
+}
+
 async function pushTicketEmailToSheet(ticket) {
-  if (!ticket || !GOOGLE_WEB_APP_URL) return { status: 'skipped', message: 'No Google Web App URL configured' };
+  const url = getGoogleWebAppUrl();
+  if (!ticket || !url) return { status: 'skipped', message: 'No Google Web App URL configured' };
   const recipient = String(ticket.email || (ticket.ticket && ticket.ticket.email) || '').trim().toLowerCase();
   if (!recipient || !recipient.includes('@')) {
     throw new Error('Ticket participant does not have a valid email address.');
@@ -125,7 +170,7 @@ async function pushTicketEmailToSheet(ticket) {
   const fullName = String(ticket.full_name || ticket.fullName || 'Participant').trim();
 
   // Try GET request first - standard browser cross-origin friendly, no CORS preflight or POST redirect rewrite issues
-  const getUrl = `${GOOGLE_WEB_APP_URL}?action=sendTicketEmail&to=${encodeURIComponent(recipient)}&ticketCode=${encodeURIComponent(ticketCode)}&fullName=${encodeURIComponent(fullName)}&_t=${Date.now()}`;
+  const getUrl = `${url}?action=sendTicketEmail&to=${encodeURIComponent(recipient)}&ticketCode=${encodeURIComponent(ticketCode)}&fullName=${encodeURIComponent(fullName)}&_t=${Date.now()}`;
 
   let result = null;
   let fetchError = null;
@@ -164,7 +209,7 @@ async function pushTicketEmailToSheet(ticket) {
   };
 
   try {
-    const res = await fetch(GOOGLE_WEB_APP_URL, {
+    const res = await fetch(url, {
       method: 'POST',
       redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -181,7 +226,7 @@ async function pushTicketEmailToSheet(ticket) {
   } catch (err) {
     fetchError = err;
     try {
-      await fetch(GOOGLE_WEB_APP_URL, {
+      await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload),
@@ -200,9 +245,10 @@ async function pushTicketEmailToSheet(ticket) {
 }
 
 async function pushTestEmailToSheet(to) {
-  if (!GOOGLE_WEB_APP_URL) return;
+  const url = getGoogleWebAppUrl();
+  if (!url) return;
   const recipient = String(to || '').trim().toLowerCase();
-  const getUrl = `${GOOGLE_WEB_APP_URL}?action=sendTestEmail&to=${encodeURIComponent(recipient)}&_t=${Date.now()}`;
+  const getUrl = `${url}?action=sendTestEmail&to=${encodeURIComponent(recipient)}&_t=${Date.now()}`;
   let result = null;
   let fetchError = null;
 
@@ -230,7 +276,7 @@ async function pushTestEmailToSheet(to) {
   };
 
   try {
-    const res = await fetch(GOOGLE_WEB_APP_URL, {
+    const res = await fetch(url, {
       method: 'POST',
       redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -244,7 +290,7 @@ async function pushTestEmailToSheet(to) {
     }
   } catch (err) {
     try {
-      await fetch(GOOGLE_WEB_APP_URL, {
+      await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload),
@@ -518,14 +564,25 @@ async function handleStaticApi(url, options = {}) {
       };
       createdTickets.push(newTicket);
       list.unshift(newTicket);
-      pushTicketToSheet(newTicket, 'appendTicket');
     }
     saveLocalTickets(list);
+    // Push all tickets in one clean batch to Google Sheet
+    syncAllTicketsToSheet(list).catch(() => {});
     return {
       message: `Successfully issued ${createdTickets.length} ticket${createdTickets.length === 1 ? '' : 's'} (${days} day${days === 1 ? '' : 's'} pass).`,
       count: createdTickets.length,
       days,
       tickets: createdTickets
+    };
+  }
+
+  if (url === '/api/admin/sheets/push' && method === 'POST') {
+    const list = getLocalTickets();
+    const result = await syncAllTicketsToSheet(list);
+    return {
+      message: `Successfully pushed ${list.length} tickets to Google Sheet.`,
+      count: list.length,
+      result
     };
   }
 
@@ -579,18 +636,50 @@ async function handleStaticApi(url, options = {}) {
       throw err;
     }
 
+    const maxDays = Number(t.max_days) || 2;
+    if ((t.entry_count || 0) >= maxDays) {
+      const err = new Error(`This ticket is already used! Yeh ticket pehle hi all ${maxDays} din (${maxDays} entries) use ho chuka hai.`);
+      err.status = 409;
+      err.data = { ticket: t, limitReached: true, alreadyUsed: true, maxDays };
+      throw err;
+    }
+
+    const todayStr = (new Date()).toISOString().slice(0, 10);
+    const lastEntryStr = t.last_entry_at ? (new Date(t.last_entry_at)).toISOString().slice(0, 10) : null;
+    const entryDates = Array.isArray(t.entry_dates) ? t.entry_dates : (lastEntryStr ? [lastEntryStr] : []);
+
+    if (entryDates.includes(todayStr) || lastEntryStr === todayStr) {
+      const err = new Error('This ticket is already used today! 1 din mein sirf 1 bar entry allowed hai.');
+      err.status = 409;
+      err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
+      throw err;
+    }
+
     t.entry_count = (t.entry_count || 0) + 1;
     t.first_entry_at = t.first_entry_at || now.toISOString();
     t.last_entry_at = now.toISOString();
+    if (!Array.isArray(t.entry_dates)) {
+      t.entry_dates = lastEntryStr ? [lastEntryStr] : [];
+    }
+    if (!t.entry_dates.includes(todayStr)) {
+      t.entry_dates.push(todayStr);
+    }
     t.status = 'checked_in';
     saveLocalTickets(list);
 
     pushTicketToSheet(t, 'updateTicket');
 
-    const repeat = t.entry_count > 1;
+    const dayNumber = t.entry_count;
+    const isFinalDay = dayNumber >= maxDays;
+    const message = isFinalDay
+      ? `Entry allowed! Welcome (Day ${dayNumber} of ${maxDays} check-in successful · Final Day).`
+      : `Entry allowed! Welcome (Day ${dayNumber} of ${maxDays} check-in successful).`;
+
     return {
-      message: repeat ? `Entry allowed (visit ${t.entry_count}).` : 'Entry allowed. Welcome!',
-      repeat,
+      message,
+      dayNumber,
+      maxDays,
+      repeat: dayNumber > 1,
       ticket: t
     };
   }
@@ -1516,8 +1605,16 @@ async function performCheckin(ticketCode) {
     $('#ticket-code-input').value = '';
     refreshStats();
   } catch (error) {
-    showCheckinResult('error', error.message, error.data && error.data.ticket);
-    note.textContent = error.message; note.className = 'scanner-message error';
+    const isAlreadyUsed = Boolean(
+      (error.data && (error.data.alreadyUsed || error.data.alreadyScannedToday || error.data.limitReached)) ||
+      (error.message && (error.message.includes('already used') || error.message.includes('Already used') || error.message.includes('pehle hi use') || error.message.includes('limit reached')))
+    );
+    const displayMsg = isAlreadyUsed
+      ? 'This ticket is already used today! (Entry Denied)'
+      : error.message;
+    showCheckinResult(isAlreadyUsed ? 'warning' : 'error', displayMsg, error.data && error.data.ticket, isAlreadyUsed ? 'ENTRY DENIED · ALREADY USED TODAY' : '');
+    note.textContent = displayMsg;
+    note.className = isAlreadyUsed ? 'scanner-message warning' : 'scanner-message error';
   }
 }
 $('#manual-checkin-form').addEventListener('submit', async (event) => {
@@ -1561,8 +1658,17 @@ async function stopScanner() {
 $('#start-scanner').addEventListener('click', startScanner);
 $('#stop-scanner').addEventListener('click', stopScanner);
 
-/* ---- Google Sheets Integration (Permanently Attached) ---- */
-// Background real-time sync is permanently active for spreadsheet: 12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o
+async function triggerSheetsSync() {
+  toast('Syncing tickets with Google Sheet…');
+  try {
+    const res = await api('/api/admin/sheets/push', { method: 'POST' });
+    toast(`✓ ${res.message || 'Tickets synced to Google Sheet successfully!'}`);
+  } catch (err) {
+    toast(`Google Sheet sync: ${err.message}`, 'error');
+  }
+}
+$('#quick-sheet-sync')?.addEventListener('click', triggerSheetsSync);
+$('#btn-sync-tickets-sheets')?.addEventListener('click', triggerSheetsSync);
 
 (async function initialize() {
   if (isStaticHost) {

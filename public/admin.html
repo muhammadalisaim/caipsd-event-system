@@ -348,6 +348,7 @@
             <section class="panel quick-panel">
               <div class="panel-heading"><div><h2>Event Controls</h2><p>Operational shortcuts</p></div></div>
               <button class="quick-action" id="quick-open-gate"><span class="quick-icon quick-icon-green">⌗</span><span><strong>Open Gate Scanner</strong><small>Switch to entrance camera QR scanner</small></span><b>→</b></button>
+              <button class="quick-action" id="quick-sheet-sync"><span class="quick-icon quick-icon-purple">🔄</span><span><strong>Sync to Google Sheet</strong><small>Push all tickets immediately to sheet</small></span><b>→</b></button>
               <button class="quick-action" id="quick-duration-action"><span class="quick-icon quick-icon-blue">⚙</span><span><strong>Event Duration (Days)</strong><small>Set ticket validity duration (2, 3, 4 days)</small></span><b>→</b></button>
               <a class="quick-action" href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener"><span class="quick-icon quick-icon-blue">📊</span><span><strong>Google Sheet Database ↗</strong><small>Live auto-sync records</small></span><b>↗</b></a>
               <button class="quick-action" id="quick-export"><span class="quick-icon quick-icon-purple">⇩</span><span><strong>Export All Tickets (CSV)</strong><small>Download attendance spreadsheet report</small></span><b>→</b></button>
@@ -384,6 +385,7 @@
               <p>Every ticket you issue is saved here and tied to one participant.</p>
             </div>
             <div class="heading-actions">
+              <button class="admin-button admin-button-secondary" id="btn-sync-tickets-sheets">🔄 Sync to Sheet</button>
               <button class="admin-button admin-button-secondary" id="export-csv">↓ Export CSV</button>
               <button class="admin-button admin-button-secondary" id="btn-bulk-tickets">＋ Bulk Issue</button>
               <button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue Ticket</button>
