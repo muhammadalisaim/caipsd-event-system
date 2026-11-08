@@ -1,0 +1,592 @@
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+let html5Scanner = null;
+let scannerRunning = false;
+let searchTimer = null;
+let lastFocused = null;
+let appConfig = { validDays: 3, mail: { configured: false } };
+
+function escapeHtml(value = '') {
+  return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+}
+function dateTimeLabel(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+}
+function pill(kind, label) { return `<span class="status-pill status-${kind}">${escapeHtml(label)}</span>`; }
+function ticketPill(ticket) {
+  if (ticket.status === 'expired') return pill('closed', 'Expired');
+  if (ticket.status === 'checked_in') return pill('checked_in', `Entered · ${ticket.entry_count}×`);
+  return pill('open', 'Valid');
+}
+function emailPill(ticket) {
+  if (ticket.email_status === 'sent') return pill('open', 'Sent');
+  if (ticket.email_status === 'failed') return `<span title="${escapeHtml(ticket.email_error || '')}">${pill('closed', 'Failed')}</span>`;
+  return pill('draft', 'Not sent');
+}
+function toast(message, type = 'success') {
+  const node = document.createElement('div');
+  node.className = `toast ${type}`;
+  node.textContent = message;
+  $('#toast-region').appendChild(node);
+  setTimeout(() => node.remove(), 5000);
+}
+async function api(url, options = {}) {
+  const response = await fetch(url, { credentials: 'same-origin', ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) } });
+  let data = {};
+  try { data = await response.json(); } catch { /* download or empty body */ }
+  if (!response.ok) {
+    if (response.status === 401 && !url.includes('/login')) showLogin();
+    const error = new Error(data.error || `Request failed (${response.status}).`);
+    error.data = data; error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function showLogin() {
+  $('#admin-app').hidden = true;
+  $('#login-screen').hidden = false;
+  $('#login-error').textContent = '';
+  $('#login-form').reset();
+}
+function showApp(email) {
+  $('#login-screen').hidden = true;
+  $('#admin-app').hidden = false;
+  $('#admin-email').textContent = email || 'Organizer';
+  $('#admin-avatar').textContent = (email || 'A').charAt(0).toUpperCase();
+  loadConfig().then(loadDashboard);
+}
+
+$('#login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = $('#login-button');
+  const fields = Object.fromEntries(new FormData(event.currentTarget).entries());
+  $('#login-error').textContent = '';
+  button.disabled = true; button.textContent = 'Signing in…';
+  try {
+    const data = await api('/api/admin/login', { method: 'POST', body: JSON.stringify(fields) });
+    showApp(data.admin.email);
+  } catch (error) {
+    if (error.message.includes('fetch') || error.name === 'TypeError') {
+      $('#login-error').textContent = 'Server connection failed. Please ensure the backend server is running on http://localhost:3000.';
+    } else {
+      $('#login-error').textContent = error.message;
+    }
+  }
+  finally { button.disabled = false; button.innerHTML = 'Sign in <span>→</span>'; }
+});
+$('#logout-button').addEventListener('click', async () => {
+  try { await api('/api/admin/logout', { method: 'POST' }); } catch (error) { console.error(error); }
+  stopScanner(); showLogin();
+});
+
+function setView(viewName) {
+  if (!['overview', 'tickets', 'attendance', 'sheets'].includes(viewName)) return;
+  $$('.view-section').forEach((section) => section.classList.toggle('active', section.id === `view-${viewName}`));
+  $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === viewName));
+  $('#breadcrumb-current').textContent = ({ overview: 'Overview', tickets: 'Tickets', attendance: 'Entry check-in' })[viewName] || 'Overview';
+  $('#sidebar').classList.remove('open');
+  if (viewName === 'overview') loadDashboard();
+  if (viewName === 'tickets') loadTickets();
+  if (viewName === 'attendance') $('#ticket-code-input').focus();
+}
+$$('.nav-item').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
+$$('[data-view-link]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.viewLink)));
+$('#mobile-menu').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+$$('[data-action="new-ticket"]').forEach((button) => button.addEventListener('click', openTicketModal));
+$('#admin-year').textContent = new Date().getFullYear();
+
+async function loadConfig() {
+  try { appConfig = await api('/api/admin/config'); } catch (error) { console.error(error); }
+  if ($('#valid-days')) $('#valid-days').textContent = appConfig.validDays || 3;
+  const configured = Boolean(appConfig.mail && appConfig.mail.configured);
+  if ($('#send-email-checkbox')) {
+    $('#send-email-checkbox').checked = configured;
+    $('#send-email-checkbox').disabled = !configured;
+  }
+  if ($('#send-email-label')) {
+    $('#send-email-label').textContent = configured
+      ? 'Email the ticket to the participant now'
+      : 'Connect Google account to email tickets automatically';
+  }
+
+  // Update topbar mail pill
+  const topbarDot = $('#topbar-mail-dot');
+  const topbarText = $('#topbar-mail-text');
+  if (topbarDot && topbarText) {
+    if (configured) {
+      topbarDot.style.background = '#22c55e';
+      topbarText.textContent = appConfig.mail.user ? `${appConfig.mail.user}` : 'Google Mail Connected';
+    } else {
+      topbarDot.style.background = '#f59d14';
+      topbarText.textContent = 'Connect Google Mail';
+    }
+  }
+
+  // Update quick action subtitle
+  const quickSub = $('#quick-mail-sub');
+  if (quickSub) {
+    quickSub.textContent = configured
+      ? `Connected: ${appConfig.mail.user || 'Google Mail'}`
+      : 'Configure Gmail for automated delivery';
+  }
+
+  // Update email delivery status panel
+  const mailStatus = $('#mail-status');
+  if (mailStatus) {
+    if (configured) {
+      mailStatus.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <p style="margin:0 0 5px;"><span class="ok">● Connected.</span> Sender: <strong>${escapeHtml(appConfig.mail.from || appConfig.mail.user)}</strong></p>
+            <p style="margin:0; font-size:12px; color:#64748b;">Ready to send admission tickets with QR passes. Use <em>Email all students (1-Click)</em> or send individually.</p>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="admin-button admin-button-secondary" id="panel-test-mail-btn" style="padding:0.35rem 0.75rem; font-size:0.8rem;">Send Test Email</button>
+            <button class="admin-button admin-button-light" id="panel-edit-mail-btn" style="padding:0.35rem 0.75rem; font-size:0.8rem;">Settings</button>
+          </div>
+        </div>
+      `;
+      $('#panel-test-mail-btn')?.addEventListener('click', triggerTestEmail);
+      $('#panel-edit-mail-btn')?.addEventListener('click', openMailModal);
+    } else {
+      mailStatus.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <p style="margin:0 0 5px;"><span class="warn">● Not connected.</span> Google Account is not connected yet.</p>
+            <p style="margin:0; font-size:12px; color:#64748b;">Connect your Gmail using a Google App Password to enable 1-click email delivery of ticket passes to students.</p>
+          </div>
+          <button class="admin-button admin-button-primary" id="panel-connect-mail-btn" style="padding:0.4rem 0.9rem; font-size:0.82rem;">Connect Google Account →</button>
+        </div>
+      `;
+      $('#panel-connect-mail-btn')?.addEventListener('click', openMailModal);
+    }
+  }
+}
+
+async function loadDashboard() {
+  try {
+    const [summary, list] = await Promise.all([api('/api/admin/summary'), api('/api/admin/tickets')]);
+    renderStats(summary);
+    $('#recent-tickets').innerHTML = ticketsTable(list.tickets.slice(0, 6), false);
+  } catch (error) { console.error('Dashboard load failed:', error); }
+}
+function renderStats(s) {
+  $('#stat-total').textContent = s.total; $('#stat-entered').textContent = s.entered;
+  $('#stat-awaiting').textContent = s.awaiting; $('#stat-emailed').textContent = s.emailed;
+  $('#stat-expired-note').textContent = s.expired ? `${s.expired} ticket${s.expired === 1 ? '' : 's'} expired` : 'Tickets sent by email';
+}
+async function refreshStats() {
+  try { renderStats(await api('/api/admin/summary')); } catch (error) { console.error(error); }
+}
+
+function participantCell(row) {
+  const initials = row.full_name.trim().split(/\s+/).slice(0, 2).map((word) => word[0] || '').join('').toUpperCase();
+  return `<div class="participant-cell"><span class="participant-avatar">${escapeHtml(initials)}</span><span><strong>${escapeHtml(row.full_name)}</strong><small>${escapeHtml(row.email)}</small></span></div>`;
+}
+function ticketsTable(rows, withActions) {
+  if (!rows.length) return '<div class="empty-table">No tickets found. Use “Issue ticket” to create the first one.</div>';
+  const head = `<tr><th>PARTICIPANT</th><th>PHONE</th><th>TICKET ID</th><th>VALID UNTIL</th><th>STATUS</th><th>EMAIL</th>${withActions ? '<th></th>' : ''}</tr>`;
+  const body = rows.map((row) => `<tr><td>${participantCell(row)}</td><td>${escapeHtml(row.phone)}</td><td><strong>${escapeHtml(row.ticket_code)}</strong></td><td>${escapeHtml(dateTimeLabel(row.valid_until))}</td><td>${ticketPill(row)}</td><td>${emailPill(row)}</td>${withActions ? `<td><div class="row-actions"><a class="status-action" href="/ticket.html?code=${encodeURIComponent(row.ticket_code)}" target="_blank" rel="noopener">View</a><button class="status-action send-ticket" data-id="${row.id}" data-email="${escapeHtml(row.email)}">${row.email_status === 'sent' ? 'Resend' : 'Send email'}</button><button class="status-action danger cancel-ticket" data-id="${row.id}" data-name="${escapeHtml(row.full_name)}">Cancel</button></div></td>` : ''}</tr>`).join('');
+  return `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+async function loadTickets() {
+  const params = new URLSearchParams();
+  const q = $('#search-tickets').value.trim();
+  const status = $('#filter-status').value;
+  if (q) params.set('q', q);
+  if (status) params.set('status', status);
+  try {
+    const data = await api(`/api/admin/tickets?${params.toString()}`);
+    $('#tickets-table').innerHTML = ticketsTable(data.tickets, true);
+    $$('.send-ticket').forEach((button) => button.addEventListener('click', async () => {
+      button.disabled = true; button.textContent = 'Sending…';
+      try {
+        const result = await api(`/api/admin/tickets/${button.dataset.id}/send`, { method: 'POST' });
+        toast(result.message);
+      } catch (error) { toast(error.message, 'error'); }
+      await loadTickets(); refreshStats();
+    }));
+    $$('.cancel-ticket').forEach((button) => button.addEventListener('click', async () => {
+      if (!confirm(`Cancel the ticket for ${button.dataset.name}? Its QR code will stop working.`)) return;
+      button.disabled = true;
+      try {
+        const result = await api(`/api/admin/tickets/${button.dataset.id}`, { method: 'DELETE' });
+        toast(result.message);
+        await loadTickets(); refreshStats();
+      } catch (error) { toast(error.message, 'error'); button.disabled = false; }
+    }));
+  } catch (error) { $('#tickets-table').innerHTML = `<div class="empty-table">${escapeHtml(error.message)}</div>`; }
+}
+$('#search-tickets').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadTickets, 250); });
+$('#filter-status').addEventListener('change', loadTickets);
+
+async function exportCsv() {
+  try {
+    const response = await fetch('/api/admin/export.csv', { credentials: 'same-origin' });
+    if (!response.ok) { const result = await response.json(); throw new Error(result.error || 'Export failed.'); }
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'caipsd-tickets.csv';
+    document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+  } catch (error) { toast(error.message, 'error'); }
+}
+$('#export-csv').addEventListener('click', exportCsv);
+$('#quick-export').addEventListener('click', exportCsv);
+
+/* ---- Issue ticket modal ---- */
+const ticketModal = $('#ticket-modal');
+function openTicketModal() {
+  lastFocused = document.activeElement;
+  const form = $('#ticket-form'); form.reset();
+  $('#send-email-checkbox').checked = appConfig.mail.configured;
+  $('#ticket-form-error').textContent = '';
+  ticketModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => form.elements.fullName.focus(), 50);
+}
+function closeTicketModal() {
+  ticketModal.hidden = true; document.body.style.overflow = '';
+  if (lastFocused && lastFocused.focus) lastFocused.focus();
+}
+$('#close-ticket-modal').addEventListener('click', closeTicketModal);
+$('#cancel-ticket').addEventListener('click', closeTicketModal);
+ticketModal.addEventListener('click', (event) => { if (event.target === ticketModal) closeTicketModal(); });
+
+/* ---- Google Mail Modal ---- */
+const mailModal = $('#mail-modal');
+async function openMailModal() {
+  lastFocused = document.activeElement;
+  $('#mail-form-error').textContent = '';
+  $('#mail-form-success').textContent = '';
+  $('#mail-form-success').style.display = 'none';
+  $('#mail-pass-input').value = '';
+
+  try {
+    const data = await api('/api/admin/mail/config');
+    if (data.configured) {
+      $('#mail-user-input').value = data.user || '';
+      $('#mail-fromname-input').value = data.fromName || '';
+      $('#save-mail-btn').innerHTML = 'Update Connection <span>→</span>';
+      $('#disconnect-mail-btn').style.display = 'inline-flex';
+      $('#test-mail-btn').style.display = 'inline-flex';
+    } else {
+      $('#mail-user-input').value = '';
+      $('#mail-fromname-input').value = 'CAIPSD Events - The Islamia University of Bahawalpur';
+      $('#save-mail-btn').innerHTML = 'Connect & Save <span>→</span>';
+      $('#disconnect-mail-btn').style.display = 'none';
+      $('#test-mail-btn').style.display = 'none';
+    }
+  } catch (error) {
+    console.error('Mail config fetch failed:', error);
+  }
+
+  mailModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => $('#mail-user-input').focus(), 50);
+}
+
+function closeMailModal() {
+  mailModal.hidden = true;
+  document.body.style.overflow = '';
+  if (lastFocused && lastFocused.focus) lastFocused.focus();
+}
+
+$('#close-mail-modal')?.addEventListener('click', closeMailModal);
+$('#cancel-mail-modal')?.addEventListener('click', closeMailModal);
+mailModal?.addEventListener('click', (event) => { if (event.target === mailModal) closeMailModal(); });
+$('#manage-mail-btn')?.addEventListener('click', openMailModal);
+$('#topbar-email-btn')?.addEventListener('click', openMailModal);
+$('#quick-connect-mail')?.addEventListener('click', openMailModal);
+
+$('#mail-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const user = $('#mail-user-input').value.trim();
+  const pass = $('#mail-pass-input').value.trim();
+  const fromName = $('#mail-fromname-input').value.trim();
+  const button = $('#save-mail-btn');
+  const errorBox = $('#mail-form-error');
+  const successBox = $('#mail-form-success');
+
+  errorBox.textContent = '';
+  successBox.style.display = 'none';
+  button.disabled = true;
+  button.textContent = 'Verifying with Google…';
+
+  try {
+    const result = await api('/api/admin/mail/config', {
+      method: 'POST',
+      body: JSON.stringify({ user, pass, fromName })
+    });
+    successBox.textContent = '✓ ' + result.message;
+    successBox.style.display = 'block';
+    toast(result.message);
+    await loadConfig();
+    setTimeout(() => {
+      closeMailModal();
+    }, 1200);
+  } catch (error) {
+    errorBox.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.innerHTML = 'Connect & Save <span>→</span>';
+  }
+});
+
+$('#disconnect-mail-btn')?.addEventListener('click', async () => {
+  if (!confirm('Are you sure you want to disconnect your Google account? Ticket emails will not be sent until you reconnect.')) return;
+  const button = $('#disconnect-mail-btn');
+  button.disabled = true;
+  try {
+    const res = await api('/api/admin/mail/disconnect', { method: 'POST' });
+    toast(res.message);
+    closeMailModal();
+    await loadConfig();
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+async function triggerTestEmail() {
+  const defaultTo = appConfig.mail?.user || '';
+  const recipient = prompt('Enter the email address to receive the test message:', defaultTo);
+  if (!recipient || !recipient.trim()) return;
+  toast('Sending test email via Google…');
+  try {
+    const res = await api('/api/admin/mail/test', {
+      method: 'POST',
+      body: JSON.stringify({ to: recipient.trim() })
+    });
+    toast(res.message);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+$('#test-mail-btn')?.addEventListener('click', triggerTestEmail);
+
+/* ---- 1-Click Bulk Email Modal ---- */
+const emailAllModal = $('#email-all-modal');
+
+async function openEmailAllModal() {
+  if (!appConfig.mail || !appConfig.mail.configured) {
+    toast('Please connect your Google / Gmail account first to email students.', 'error');
+    openMailModal();
+    return;
+  }
+
+  lastFocused = document.activeElement;
+  $('#email-all-error').textContent = '';
+  $('#email-all-progress-wrap').style.display = 'none';
+  $('#email-all-progress-fill').style.width = '0%';
+  $('#confirm-email-all-btn').disabled = false;
+  $('#confirm-email-all-btn').innerHTML = '✉ Send Emails Now (1-Click)';
+
+  try {
+    const [summary, ticketsData] = await Promise.all([
+      api('/api/admin/summary'),
+      api('/api/admin/tickets')
+    ]);
+    const pendingTickets = ticketsData.tickets.filter((t) => t.email_status !== 'sent');
+    const pendingCount = pendingTickets.length;
+    $('#email-all-pending-count').textContent = pendingCount;
+    $('#email-all-total-count').textContent = summary.total;
+    $('#email-all-sent-count').textContent = summary.emailed;
+
+    const radioPending = $('input[name="emailMode"][value="pending"]');
+    const radioAll = $('input[name="emailMode"][value="all"]');
+
+    if (pendingCount === 0 && summary.total > 0) {
+      if (radioAll) radioAll.checked = true;
+      $$('.radio-card').forEach((c) => c.classList.toggle('active', c.contains(radioAll)));
+    } else {
+      if (radioPending) radioPending.checked = true;
+      $$('.radio-card').forEach((c) => c.classList.toggle('active', c.contains(radioPending)));
+    }
+  } catch (error) {
+    console.error('Failed to prepare email all dialog:', error);
+  }
+
+  emailAllModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeEmailAllModal() {
+  emailAllModal.hidden = true;
+  document.body.style.overflow = '';
+  if (lastFocused && lastFocused.focus) lastFocused.focus();
+}
+
+$('#close-email-all-modal')?.addEventListener('click', closeEmailAllModal);
+$('#cancel-email-all-modal')?.addEventListener('click', closeEmailAllModal);
+emailAllModal?.addEventListener('click', (event) => { if (event.target === emailAllModal) closeEmailAllModal(); });
+$('#btn-email-all')?.addEventListener('click', openEmailAllModal);
+$('#quick-email-all')?.addEventListener('click', openEmailAllModal);
+$('#stat-card-emailed')?.addEventListener('click', openEmailAllModal);
+
+$$('.radio-card input').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    $$('.radio-card').forEach((card) => card.classList.toggle('active', card.contains(radio)));
+  });
+});
+
+$('#email-all-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const selectedMode = $('input[name="emailMode"]:checked')?.value || 'pending';
+  const button = $('#confirm-email-all-btn');
+  const cancelBtn = $('#cancel-email-all-modal');
+  const closeBtn = $('#close-email-all-modal');
+  const progressWrap = $('#email-all-progress-wrap');
+  const progressFill = $('#email-all-progress-fill');
+  const progressText = $('#email-all-progress-text');
+  const errorBox = $('#email-all-error');
+
+  errorBox.textContent = '';
+  button.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (closeBtn) closeBtn.disabled = true;
+  progressWrap.style.display = 'block';
+  progressFill.style.width = '25%';
+  progressText.textContent = 'Generating QR codes and emailing students… please wait.';
+
+  let progressInterval = setInterval(() => {
+    const current = parseFloat(progressFill.style.width) || 25;
+    if (current < 85) progressFill.style.width = (current + 10) + '%';
+  }, 400);
+
+  try {
+    const data = await api('/api/admin/tickets/email-all', {
+      method: 'POST',
+      body: JSON.stringify({ mode: selectedMode })
+    });
+    clearInterval(progressInterval);
+    progressFill.style.width = '100%';
+    progressText.textContent = data.message;
+    toast(data.message);
+
+    setTimeout(() => {
+      closeEmailAllModal();
+      refreshStats();
+      if ($('#view-tickets').classList.contains('active')) loadTickets();
+      else if ($('#view-overview').classList.contains('active')) loadDashboard();
+    }, 1000);
+  } catch (error) {
+    clearInterval(progressInterval);
+    progressWrap.style.display = 'none';
+    errorBox.textContent = error.message;
+    toast(error.message, 'error');
+    button.disabled = false;
+    if (cancelBtn) cancelBtn.disabled = false;
+    if (closeBtn) closeBtn.disabled = false;
+  }
+});
+
+/* Modal keyboard accessibility */
+document.addEventListener('keydown', (event) => {
+  const activeModal = [ticketModal, mailModal, emailAllModal].find((m) => m && !m.hidden);
+  if (!activeModal) return;
+  if (event.key === 'Escape') {
+    if (activeModal === ticketModal) closeTicketModal();
+    else if (activeModal === mailModal) closeMailModal();
+    else if (activeModal === emailAllModal) closeEmailAllModal();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = [...activeModal.querySelectorAll('button, input, select, textarea, a[href]')].filter((el) => !el.disabled);
+  if (!focusable.length) return;
+  const first = focusable[0]; const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+$('#ticket-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = { fullName: form.elements.fullName.value, email: form.elements.email.value, phone: form.elements.phone.value, sendEmail: form.elements.sendEmail.checked };
+  const button = $('#save-ticket'); button.disabled = true; button.textContent = 'Generating…'; $('#ticket-form-error').textContent = '';
+  try {
+    const data = await api('/api/admin/tickets', { method: 'POST', body: JSON.stringify(payload) });
+    closeTicketModal();
+    if (data.email.status === 'sent') toast(`Ticket created and emailed to ${data.ticket.email}.`);
+    else if (data.email.status === 'failed') toast(`Ticket created, but the email failed: ${data.email.error}`, 'error');
+    else toast('Ticket created and saved. Use “Send email” when you are ready to deliver it.');
+    refreshStats();
+    if ($('#view-tickets').classList.contains('active')) loadTickets(); else if ($('#view-overview').classList.contains('active')) loadDashboard();
+  } catch (error) { $('#ticket-form-error').textContent = error.message; }
+  finally { button.disabled = false; button.innerHTML = 'Generate ticket <span>→</span>'; }
+});
+
+/* ---- Entry check-in ---- */
+function showCheckinResult(type, message, ticket = null, extra = '') {
+  const result = $('#checkin-result');
+  result.className = `checkin-result ${type}`;
+  const icon = type === 'success' ? '✓' : type === 'warning' ? '!' : '×';
+  const detail = ticket ? `<small>${escapeHtml(ticket.full_name)}<br>Ticket: ${escapeHtml(ticket.ticket_code)} · Valid until ${escapeHtml(dateTimeLabel(ticket.valid_until))}${extra ? `<br>${escapeHtml(extra)}` : ''}</small>` : '<small>Please check the ticket and try again.</small>';
+  result.innerHTML = `<div class="result-icon">${icon}</div><strong>${escapeHtml(message)}</strong>${detail}`;
+}
+async function performCheckin(ticketCode) {
+  const cleaned = String(ticketCode || '').trim();
+  if (!cleaned) return;
+  const note = $('#scanner-message');
+  note.textContent = '';
+  try {
+    const result = await api('/api/admin/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
+    showCheckinResult(result.repeat ? 'warning' : 'success', result.message, result.ticket, result.repeat ? `Previous entry: ${dateTimeLabel(result.ticket.first_entry_at)}` : '');
+    note.textContent = result.message; note.className = 'scanner-message success';
+    $('#ticket-code-input').value = '';
+    refreshStats();
+  } catch (error) {
+    showCheckinResult('error', error.message, error.data && error.data.ticket);
+    note.textContent = error.message; note.className = 'scanner-message error';
+  }
+}
+$('#manual-checkin-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await performCheckin($('#ticket-code-input').value);
+});
+
+async function startScanner() {
+  if (scannerRunning) return;
+  if (typeof Html5Qrcode === 'undefined') {
+    $('#scanner-message').textContent = 'The camera scanner library could not load. Use manual ticket ID check-in instead.';
+    $('#scanner-message').className = 'scanner-message error'; return;
+  }
+  try {
+    if (!html5Scanner) html5Scanner = new Html5Qrcode('reader');
+    $('#start-scanner').disabled = true; $('#scanner-message').textContent = 'Requesting camera access…';
+    await html5Scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 210, height: 210 }, aspectRatio: 1 }, async (decodedText) => {
+      $('#scanner-message').textContent = 'Ticket detected. Verifying…';
+      await stopScanner();
+      await performCheckin(decodedText);
+    }, () => {});
+    scannerRunning = true;
+    $('#start-scanner').disabled = true; $('#stop-scanner').disabled = false;
+    $('#scanner-message').textContent = 'Camera is active. Hold the QR code inside the frame.';
+    $('#scanner-message').className = 'scanner-message';
+  } catch (error) {
+    $('#scanner-message').textContent = error?.message || 'Unable to start the camera. Check camera permissions or use manual check-in.';
+    $('#scanner-message').className = 'scanner-message error';
+    $('#start-scanner').disabled = false; $('#stop-scanner').disabled = true;
+  }
+}
+async function stopScanner() {
+  if (html5Scanner && scannerRunning) {
+    try { await html5Scanner.stop(); } catch (error) { console.warn('Scanner stop:', error); }
+    try { await html5Scanner.clear(); } catch (error) { console.warn('Scanner clear:', error); }
+  }
+  scannerRunning = false;
+  if ($('#start-scanner')) $('#start-scanner').disabled = false;
+  if ($('#stop-scanner')) $('#stop-scanner').disabled = true;
+}
+$('#start-scanner').addEventListener('click', startScanner);
+$('#stop-scanner').addEventListener('click', stopScanner);
+
+/* ---- Google Sheets Integration (Permanently Attached) ---- */
+// Background real-time sync is permanently active for spreadsheet: 12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o
+
+(async function initialize() {
+  try { const data = await api('/api/admin/me'); showApp(data.admin.email); } catch { showLogin(); }
+})();
