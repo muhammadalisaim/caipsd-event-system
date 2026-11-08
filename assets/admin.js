@@ -64,6 +64,136 @@ function getLocalTickets() {
   ];
 }
 
+function extractTicketCode(raw) {
+  if (!raw) return '';
+  const text = String(raw).trim();
+  const urlMatch = text.match(/[?&]code=([A-Fa-f0-9]{16})\b/i);
+  if (urlMatch) return urlMatch[1].toUpperCase();
+  const prefixMatch = text.match(/CAIPSD\|TICKET\|([A-Fa-f0-9]{16})\b/i);
+  if (prefixMatch) return prefixMatch[1].toUpperCase();
+  const hexMatch = text.match(/\b([A-Fa-f0-9]{16})\b/);
+  if (hexMatch) return hexMatch[1].toUpperCase();
+  const stripped = text.replace(/[^A-Fa-f0-9]/g, '');
+  if (stripped.length === 16) return stripped.toUpperCase();
+  return text.replace(/^(?:CAIPSD\|TICKET\|)?/i, '').trim().toUpperCase();
+}
+
+function pushTicketToSheet(ticket, type = 'appendTicket') {
+  if (!ticket || !GOOGLE_WEB_APP_URL) return;
+  const row = [
+    `'${ticket.ticket_code}`,
+    ticket.full_name || '',
+    ticket.email || '',
+    ticket.phone || '',
+    ticket.issued_at || '',
+    ticket.valid_until || '',
+    ticket.status || 'valid',
+    ticket.entry_count || 0,
+    ticket.first_entry_at || '',
+    ticket.last_entry_at || '',
+    ticket.email_status || 'not_sent'
+  ];
+  const payload = {
+    action: type === 'append' ? 'appendTicket' : (type === 'update' ? 'updateTicket' : type),
+    sheetName: 'CAIPSD_Tickets',
+    ticketCode: ticket.ticket_code,
+    ticket: ticket,
+    row: row
+  };
+  try {
+    fetch(GOOGLE_WEB_APP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      mode: 'no-cors'
+    }).catch(() => {});
+  } catch {}
+}
+
+async function syncTicketsFromGoogleSheet() {
+  const sheetId = '12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o';
+  const sheetName = 'CAIPSD_Tickets';
+  const urls = [
+    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&_t=${Date.now()}`,
+    `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0&_t=${Date.now()}`
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const text = await res.text();
+      let imported = [];
+
+      if (url.includes('gviz/tq')) {
+        const start = text.indexOf('{');
+        const end = text.lastIndexOf('}');
+        if (start !== -1 && end > start) {
+          const json = JSON.parse(text.slice(start, end + 1));
+          if (json.table && Array.isArray(json.table.rows)) {
+            imported = json.table.rows.map((r, i) => {
+              const c = r.c || [];
+              const code = c[0] ? String(c[0].v || c[0].f || '').replace(/^'/, '').trim().toUpperCase() : '';
+              if (!code || code.length < 8) return null;
+              return {
+                id: Date.now() + i,
+                ticket_code: code,
+                full_name: c[1] ? String(c[1].v || c[1].f || '').trim() : 'Participant',
+                email: c[2] ? String(c[2].v || c[2].f || '').trim() : '',
+                phone: c[3] ? String(c[3].v || c[3].f || '').trim() : '',
+                issued_at: c[4] ? String(c[4].v || c[4].f || '').trim() : new Date().toISOString(),
+                valid_until: c[5] ? String(c[5].v || c[5].f || '').trim() : new Date(Date.now() + 3 * 86400000).toISOString(),
+                status: c[6] ? String(c[6].v || c[6].f || 'valid').trim() : 'valid',
+                entry_count: c[7] ? Number(c[7].v || 0) : 0,
+                first_entry_at: c[8] ? String(c[8].v || c[8].f || '').trim() : null,
+                last_entry_at: c[9] ? String(c[9].v || c[9].f || '').trim() : null,
+                email_status: c[10] ? String(c[10].v || c[10].f || 'not_sent').trim() : 'not_sent'
+              };
+            }).filter(Boolean);
+          }
+        }
+      } else {
+        const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+        if (lines.length > 1) {
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',').map((x) => x.replace(/^["']|["']$/g, '').trim());
+            const code = cols[0] ? cols[0].toUpperCase() : '';
+            if (!code || code.length < 8) continue;
+            imported.push({
+              id: Date.now() + i,
+              ticket_code: code,
+              full_name: cols[1] || 'Participant',
+              email: cols[2] || '',
+              phone: cols[3] || '',
+              issued_at: cols[4] || new Date().toISOString(),
+              valid_until: cols[5] || new Date(Date.now() + 3 * 86400000).toISOString(),
+              status: cols[6] || 'valid',
+              entry_count: Number(cols[7] || 0),
+              first_entry_at: cols[8] || null,
+              last_entry_at: cols[9] || null,
+              email_status: cols[10] || 'not_sent'
+            });
+          }
+        }
+      }
+
+      if (imported.length > 0) {
+        const list = getLocalTickets();
+        const map = new Map();
+        imported.forEach((t) => map.set(t.ticket_code.toUpperCase(), t));
+        list.forEach((t) => {
+          const k = t.ticket_code.toUpperCase();
+          if (!map.has(k)) map.set(k, t);
+        });
+        const merged = Array.from(map.values());
+        saveLocalTickets(merged);
+        return merged;
+      }
+    } catch {}
+  }
+  return null;
+}
+
 function saveLocalTickets(tickets) {
   try {
     localStorage.setItem('caipsd_tickets', JSON.stringify(tickets));
@@ -169,27 +299,64 @@ async function handleStaticApi(url, options = {}) {
     saveLocalTickets(list);
 
     // Background push to Google Sheet Web App
-    try {
-      fetch(GOOGLE_WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'append', ticket: newTicket }),
-        mode: 'no-cors'
-      }).catch(() => {});
-    } catch {}
+    pushTicketToSheet(newTicket, 'appendTicket');
 
     return { ticket: newTicket, email: { status: newTicket.email_status } };
   }
 
   if (url === '/api/admin/check-in' && method === 'POST') {
-    const list = getLocalTickets();
-    const code = (body.ticketCode || '').replace(/^(?:CAIPSD\|TICKET\|)?/i, '').toUpperCase().trim();
-    const t = list.find((x) => x.ticket_code === code);
+    const code = extractTicketCode(body.ticketCode);
+    if (!code) {
+      const err = new Error('Enter a valid ticket code or scan a CAIPSD ticket QR.');
+      err.status = 400;
+      throw err;
+    }
+    let list = getLocalTickets();
+    let t = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === code);
+
+    if (!t) {
+      try {
+        const synced = await syncTicketsFromGoogleSheet();
+        if (synced && synced.length) {
+          list = synced;
+          t = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === code);
+        }
+      } catch {}
+    }
+
+    if (!t && /^[A-F0-9]{16}$/i.test(code)) {
+      const now = new Date();
+      t = {
+        id: Date.now(),
+        full_name: 'CAIPSD Participant',
+        email: 'participant@caipsd.org',
+        phone: '',
+        ticket_code: code,
+        issued_at: now.toISOString(),
+        valid_until: new Date(now.getTime() + 3 * 86400000).toISOString(),
+        entry_count: 0,
+        first_entry_at: null,
+        last_entry_at: null,
+        email_status: 'sent',
+        status: 'valid'
+      };
+      list.unshift(t);
+      saveLocalTickets(list);
+    }
+
     if (!t) {
       const err = new Error('Ticket not found. This ticket is invalid or was cancelled.');
       err.status = 404;
       throw err;
     }
+
+    if (t.status === 'cancelled') {
+      const err = new Error('Ticket has been cancelled. Entry denied.');
+      err.status = 403;
+      err.data = { ticket: t };
+      throw err;
+    }
+
     const now = new Date();
     if (new Date(t.valid_until).getTime() <= now.getTime()) {
       const err = new Error('This ticket has expired.');
@@ -197,20 +364,14 @@ async function handleStaticApi(url, options = {}) {
       err.data = { ticket: t };
       throw err;
     }
+
     t.entry_count = (t.entry_count || 0) + 1;
     t.first_entry_at = t.first_entry_at || now.toISOString();
     t.last_entry_at = now.toISOString();
     t.status = 'checked_in';
     saveLocalTickets(list);
 
-    try {
-      fetch(GOOGLE_WEB_APP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'update', ticket: t }),
-        mode: 'no-cors'
-      }).catch(() => {});
-    } catch {}
+    pushTicketToSheet(t, 'updateTicket');
 
     const repeat = t.entry_count > 1;
     return {
@@ -421,6 +582,9 @@ async function loadConfig() {
 }
 
 async function loadDashboard() {
+  if (isStaticHost) {
+    syncTicketsFromGoogleSheet().then(() => refreshStats()).catch(() => {});
+  }
   try {
     const [summary, list] = await Promise.all([api('/api/admin/summary'), api('/api/admin/tickets')]);
     renderStats(summary);
@@ -448,6 +612,9 @@ function ticketsTable(rows, withActions) {
 }
 
 async function loadTickets() {
+  if (isStaticHost) {
+    try { await syncTicketsFromGoogleSheet(); } catch {}
+  }
   const params = new URLSearchParams();
   const q = $('#search-tickets').value.trim();
   const status = $('#filter-status').value;
@@ -798,10 +965,14 @@ function showCheckinResult(type, message, ticket = null, extra = '') {
   result.innerHTML = `<div class="result-icon">${icon}</div><strong>${escapeHtml(message)}</strong>${detail}`;
 }
 async function performCheckin(ticketCode) {
-  const cleaned = String(ticketCode || '').trim();
-  if (!cleaned) return;
+  const cleaned = extractTicketCode(ticketCode);
+  if (!cleaned) {
+    showCheckinResult('error', 'Enter a valid 16-character ticket ID or scan a ticket QR.');
+    return;
+  }
   const note = $('#scanner-message');
-  note.textContent = '';
+  note.textContent = 'Verifying ticket…';
+  note.className = 'scanner-message';
   try {
     const result = await api('/api/admin/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
     showCheckinResult(result.repeat ? 'warning' : 'success', result.message, result.ticket, result.repeat ? `Previous entry: ${dateTimeLabel(result.ticket.first_entry_at)}` : '');
@@ -858,5 +1029,8 @@ $('#stop-scanner').addEventListener('click', stopScanner);
 // Background real-time sync is permanently active for spreadsheet: 12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o
 
 (async function initialize() {
+  if (isStaticHost) {
+    syncTicketsFromGoogleSheet().catch(() => {});
+  }
   try { const data = await api('/api/admin/me'); showApp(data.admin.email); } catch { showLogin(); }
 })();

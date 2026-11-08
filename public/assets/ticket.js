@@ -1,5 +1,19 @@
+function extractTicketCode(raw) {
+  if (!raw) return '';
+  const text = String(raw).trim();
+  const urlMatch = text.match(/[?&]code=([A-Fa-f0-9]{16})\b/i);
+  if (urlMatch) return urlMatch[1].toUpperCase();
+  const prefixMatch = text.match(/CAIPSD\|TICKET\|([A-Fa-f0-9]{16})\b/i);
+  if (prefixMatch) return prefixMatch[1].toUpperCase();
+  const hexMatch = text.match(/\b([A-Fa-f0-9]{16})\b/);
+  if (hexMatch) return hexMatch[1].toUpperCase();
+  const stripped = text.replace(/[^A-Fa-f0-9]/g, '');
+  if (stripped.length === 16) return stripped.toUpperCase();
+  return text.replace(/^(?:CAIPSD\|TICKET\|)?/i, '').trim().toUpperCase();
+}
+
 const params = new URLSearchParams(window.location.search);
-const code = params.get('code');
+const code = extractTicketCode(params.get('code') || window.location.search.replace(/^\?/, ''));
 const state = document.getElementById('ticket-state');
 const card = document.getElementById('ticket-card');
 const actions = document.getElementById('ticket-actions');
@@ -17,15 +31,53 @@ async function loadTicket() {
     } catch {}
 
     if (!t) {
-      // Fallback for GitHub Pages / static hosting
+      // Fallback for GitHub Pages / static hosting: check local storage
       let list = [];
       try { list = JSON.parse(localStorage.getItem('caipsd_tickets') || '[]'); } catch {}
-      const found = list.find((x) => x.ticket_code === code.toUpperCase());
+      let found = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === code);
+
+      // Fast check from Google Sheet if not in local storage
+      if (!found) {
+        try {
+          const sheetId = '12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o';
+          const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=CAIPSD_Tickets&_t=${Date.now()}`;
+          const res = await fetch(gvizUrl);
+          if (res.ok) {
+            const txt = await res.text();
+            const start = txt.indexOf('{');
+            const end = txt.lastIndexOf('}');
+            if (start !== -1 && end > start) {
+              const data = JSON.parse(txt.slice(start, end + 1));
+              if (data.table && data.table.rows) {
+                const matchRow = data.table.rows.find((r) => {
+                  const c = r.c || [];
+                  const cVal = c[0] ? String(c[0].v || c[0].f || '').replace(/^'/, '').trim().toUpperCase() : '';
+                  return cVal === code;
+                });
+                if (matchRow) {
+                  const c = matchRow.c || [];
+                  found = {
+                    full_name: c[1] ? String(c[1].v || c[1].f || '').trim() : 'Participant',
+                    email: c[2] ? String(c[2].v || c[2].f || '').trim() : '',
+                    phone: c[3] ? String(c[3].v || c[3].f || '').trim() : '',
+                    issued_at: c[4] ? String(c[4].v || c[4].f || '').trim() : new Date().toISOString(),
+                    valid_until: c[5] ? String(c[5].v || c[5].f || '').trim() : new Date(Date.now() + 3 * 86400000).toISOString(),
+                    status: c[6] ? String(c[6].v || c[6].f || 'valid').trim() : 'valid',
+                    entry_count: c[7] ? Number(c[7].v || 0) : 0,
+                    ticket_code: code
+                  };
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+
       const now = Date.now();
       t = found || {
         full_name: 'CAIPSD Participant',
         valid_until: new Date(Date.now() + 3 * 86400000).toISOString(),
-        ticket_code: code.toUpperCase(),
+        ticket_code: code,
         status: 'valid'
       };
       t.qrDataUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(t.ticket_code)}`;

@@ -415,9 +415,13 @@ function doPost(e) {
       return respondJson({ status: 'ok', message: 'Successfully synced ' + rows.length + ' tickets to Google Sheet.', count: rows.length });
     }
 
-    if (action === 'appendTicket') {
+    if (action === 'appendTicket' || action === 'append') {
       ensureHeaders(sheet, payload.headers);
       var row = payload.row;
+      if (!row && payload.ticket) {
+        var t = payload.ticket;
+        row = ["'" + t.ticket_code, t.full_name || '', t.email || '', t.phone || '', t.issued_at || '', t.valid_until || '', t.status || 'valid', t.entry_count || 0, t.first_entry_at || '', t.last_entry_at || '', t.email_status || 'not_sent'];
+      }
       if (row && row.length) {
         var code = row[0];
         var existingRowIndex = findRowByTicketCode(sheet, code);
@@ -430,9 +434,13 @@ function doPost(e) {
       return respondJson({ status: 'ok', message: 'Ticket saved in Google Sheet.' });
     }
 
-    if (action === 'updateTicket') {
-      var ticketCode = payload.ticketCode;
+    if (action === 'updateTicket' || action === 'update') {
+      var ticketCode = payload.ticketCode || (payload.ticket && payload.ticket.ticket_code);
       var updatedRow = payload.row;
+      if (!updatedRow && payload.ticket) {
+        var t = payload.ticket;
+        updatedRow = ["'" + t.ticket_code, t.full_name || '', t.email || '', t.phone || '', t.issued_at || '', t.valid_until || '', t.status || 'valid', t.entry_count || 0, t.first_entry_at || '', t.last_entry_at || '', t.email_status || 'not_sent'];
+      }
       if (ticketCode && updatedRow) {
         var rowIndex = findRowByTicketCode(sheet, ticketCode);
         if (rowIndex > 0) {
@@ -467,7 +475,7 @@ function doPost(e) {
         var r = data[i];
         if (!r[0]) continue;
         tickets.push({
-          ticket_code: String(r[0]),
+          ticket_code: String(r[0]).replace(/^'/, '').trim(),
           full_name: String(r[1] || ''),
           email: String(r[2] || ''),
           phone: String(r[3] || ''),
@@ -492,6 +500,32 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) || 'ping';
+  if (action === 'getAll') {
+    var ss = getSpreadsheet();
+    var sheet = ss.getSheetByName('CAIPSD_Tickets') || ss.getSheets()[0];
+    var data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return respondJson({ status: 'ok', tickets: [] });
+    var tickets = [];
+    for (var i = 1; i < data.length; i++) {
+      var r = data[i];
+      if (!r[0]) continue;
+      tickets.push({
+        ticket_code: String(r[0]).replace(/^'/, '').trim(),
+        full_name: String(r[1] || ''),
+        email: String(r[2] || ''),
+        phone: String(r[3] || ''),
+        issued_at: String(r[4] || ''),
+        valid_until: String(r[5] || ''),
+        status: String(r[6] || 'valid'),
+        entry_count: Number(r[7] || 0),
+        first_entry_at: String(r[8] || ''),
+        last_entry_at: String(r[9] || ''),
+        email_status: String(r[10] || 'not_sent')
+      });
+    }
+    return respondJson({ status: 'ok', tickets: tickets });
+  }
   return respondJson({
     status: 'ok',
     message: 'CAIPSD Google Sheets API is running.',

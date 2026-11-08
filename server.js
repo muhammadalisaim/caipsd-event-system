@@ -117,6 +117,19 @@ function requireAdmin(req, res, next) {
   next();
 }
 function cleanText(value, max = 200) { return String(value ?? '').trim().slice(0, max); }
+function extractTicketCode(raw) {
+  if (!raw) return '';
+  const text = String(raw).trim();
+  const urlMatch = text.match(/[?&]code=([A-Fa-f0-9]{16})\b/i);
+  if (urlMatch) return urlMatch[1].toUpperCase();
+  const prefixMatch = text.match(/CAIPSD\|TICKET\|([A-Fa-f0-9]{16})\b/i);
+  if (prefixMatch) return prefixMatch[1].toUpperCase();
+  const hexMatch = text.match(/\b([A-Fa-f0-9]{16})\b/);
+  if (hexMatch) return hexMatch[1].toUpperCase();
+  const stripped = text.replace(/[^A-Fa-f0-9]/g, '');
+  if (stripped.length === 16) return stripped.toUpperCase();
+  return text.replace(/^(?:CAIPSD\|TICKET\|)?/i, '').trim().toUpperCase();
+}
 function normalizeEmail(value) { return cleanText(value, 180).toLowerCase(); }
 function validPhone(value) { return /^\+?[0-9][0-9\s\-()]{6,28}$/.test(value); }
 function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }
@@ -340,25 +353,50 @@ app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
   res.json({ message: 'Ticket cancelled. Its QR code will no longer work.' });
 });
 
-app.post('/api/admin/check-in', requireAdmin, (req, res) => {
-  const code = cleanText(req.body.ticketCode, 40).toUpperCase();
-  const match = code.match(/^(?:CAIPSD\|TICKET\|)?([A-F0-9]{16})$/);
-  if (!match) return res.status(400).json({ error: 'Enter a valid ticket code or scan a CAIPSD ticket QR.' });
-  const ticket = getTicketByCode(match[1]);
-  if (!ticket) return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
-  const now = new Date();
-  if (new Date(ticket.valid_until).getTime() <= now.getTime()) {
-    return res.status(410).json({ error: 'This ticket has expired.', ticket: serializeTicket(ticket) });
-  }
-  const scannedAt = now.toISOString();
-  db.transaction(() => {
-    db.prepare('INSERT INTO entries (ticket_id, scanned_at) VALUES (?, ?)').run(ticket.id, scannedAt);
-    db.prepare('UPDATE tickets SET entry_count = entry_count + 1, first_entry_at = COALESCE(first_entry_at, ?), last_entry_at = ? WHERE id = ?').run(scannedAt, scannedAt, ticket.id);
-  })();
-  const updated = serializeTicket(getTicketById(ticket.id));
-  sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
-  const repeat = updated.entry_count > 1;
-  res.json({ message: repeat ? `Entry allowed (visit ${updated.entry_count}).` : 'Entry allowed. Welcome!', repeat, ticket: updated });
+app.post('/api/admin/check-in', requireAdmin, async (req, res, next) => {
+  try {
+    const code = extractTicketCode(req.body.ticketCode);
+    const match = code.match(/^[A-F0-9]{16}$/);
+    if (!match) return res.status(400).json({ error: 'Enter a valid ticket code or scan a CAIPSD ticket QR.' });
+    let ticket = getTicketByCode(match[0]);
+    if (!ticket) {
+      try {
+        const sheetTickets = await fetchTicketsFromSheet();
+        const found = sheetTickets.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === match[0]);
+        if (found) {
+          const issued = found.issued_at || new Date().toISOString();
+          const validUntil = found.valid_until || new Date(Date.now() + TICKET_VALID_DAYS * 86400000).toISOString();
+          db.prepare(`INSERT OR IGNORE INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+            found.full_name || 'Participant',
+            found.email || `attendee-${match[0].toLowerCase()}@caipsd.org`,
+            found.phone || '',
+            match[0],
+            issued,
+            validUntil,
+            found.entry_count || 0,
+            found.first_entry_at || null,
+            found.last_entry_at || null,
+            found.email_status || 'not_sent'
+          );
+          ticket = getTicketByCode(match[0]);
+        }
+      } catch (err) {}
+    }
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
+    const now = new Date();
+    if (new Date(ticket.valid_until).getTime() <= now.getTime()) {
+      return res.status(410).json({ error: 'This ticket has expired.', ticket: serializeTicket(ticket) });
+    }
+    const scannedAt = now.toISOString();
+    db.transaction(() => {
+      db.prepare('INSERT INTO entries (ticket_id, scanned_at) VALUES (?, ?)').run(ticket.id, scannedAt);
+      db.prepare('UPDATE tickets SET entry_count = entry_count + 1, first_entry_at = COALESCE(first_entry_at, ?), last_entry_at = ? WHERE id = ?').run(scannedAt, scannedAt, ticket.id);
+    })();
+    const updated = serializeTicket(getTicketById(ticket.id));
+    sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
+    const repeat = updated.entry_count > 1;
+    res.json({ message: repeat ? `Entry allowed (visit ${updated.entry_count}).` : 'Entry allowed. Welcome!', repeat, ticket: updated });
+  } catch (error) { next(error); }
 });
 
 app.get('/api/admin/sheets/config', requireAdmin, (req, res) => {
