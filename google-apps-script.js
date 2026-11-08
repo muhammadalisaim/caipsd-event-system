@@ -240,8 +240,7 @@ function doPost(e) {
       ensureHeaders(sheet, payload.headers);
       var row = payload.row;
       if (!row && payload.ticket) {
-        var t = payload.ticket;
-        row = ["'" + t.ticket_code, t.full_name || '', t.email || '', t.phone || '', t.issued_at || '', t.valid_until || '', t.status || 'valid', t.entry_count || 0, t.first_entry_at || '', t.last_entry_at || '', t.email_status || 'not_sent'];
+        row = buildRowForTicket(sheet, payload.ticket);
       }
       if (row && row.length) {
         var code = row[0];
@@ -259,8 +258,7 @@ function doPost(e) {
       var ticketCode = payload.ticketCode || (payload.ticket && payload.ticket.ticket_code);
       var updatedRow = payload.row;
       if (!updatedRow && payload.ticket) {
-        var t = payload.ticket;
-        updatedRow = ["'" + t.ticket_code, t.full_name || '', t.email || '', t.phone || '', t.issued_at || '', t.valid_until || '', t.status || 'valid', t.entry_count || 0, t.first_entry_at || '', t.last_entry_at || '', t.email_status || 'not_sent'];
+        updatedRow = buildRowForTicket(sheet, payload.ticket);
       }
       if (ticketCode && updatedRow) {
         var rowIndex = findRowByTicketCode(sheet, ticketCode);
@@ -435,14 +433,81 @@ function doGet(e) {
   });
 }
 
+function buildRowForTicket(sheet, t) {
+  var headers = sheet.getRange(1, 1, 1, Math.min(sheet.getLastColumn() || 8, 15)).getValues()[0];
+  var c2 = String(headers[2] || '').trim().toLowerCase();
+  if (c2 === 'issued at' || headers.length <= 9) {
+    return [
+      "'" + t.ticket_code,
+      t.full_name || '',
+      t.issued_at || '',
+      t.valid_until || '',
+      t.status || 'valid',
+      t.entry_count != null ? t.entry_count : 0,
+      t.first_entry_at || '',
+      t.last_entry_at || ''
+    ];
+  }
+  return [
+    "'" + t.ticket_code,
+    t.full_name || '',
+    t.email || '',
+    t.phone || '',
+    t.issued_at || '',
+    t.valid_until || '',
+    t.status || 'valid',
+    t.entry_count != null ? t.entry_count : 0,
+    t.first_entry_at || '',
+    t.last_entry_at || '',
+    t.email_status || 'not_sent'
+  ];
+}
+
+function parseSheetRow(r) {
+  var code = String(r[0] || '').replace(/^'/, '').trim().toUpperCase();
+  if (!code || code === 'TICKET ID') return null;
+  var name = String(r[1] || 'Participant').trim();
+  var val2 = String(r[2] || '').trim();
+  var is11 = val2.indexOf('@') !== -1 || (r.length > 9 && val2.indexOf('-') === -1 && val2.indexOf('T') === -1);
+  if (is11) {
+    return {
+      ticket_code: code,
+      full_name: name,
+      email: val2,
+      phone: String(r[3] || ''),
+      issued_at: String(r[4] || ''),
+      valid_until: String(r[5] || ''),
+      status: String(r[6] || 'valid'),
+      entry_count: Number(r[7] || 0),
+      first_entry_at: String(r[8] || ''),
+      last_entry_at: String(r[9] || ''),
+      email_status: String(r[10] || 'not_sent')
+    };
+  }
+  return {
+    ticket_code: code,
+    full_name: name,
+    email: '',
+    phone: '',
+    issued_at: val2,
+    valid_until: String(r[3] || ''),
+    status: String(r[4] || 'valid'),
+    entry_count: Number(r[5] || 0),
+    first_entry_at: String(r[6] || ''),
+    last_entry_at: String(r[7] || ''),
+    email_status: 'not_sent'
+  };
+}
+
 function ensureHeaders(sheet, customHeaders) {
   if (sheet.getLastRow() === 0) {
     var headers = customHeaders || [
-      'Ticket ID', 'Full Name', 'Email', 'Phone', 'Issued At',
-      'Valid Until', 'Status', 'Entries', 'First Entry', 'Last Entry', 'Email Status'
+      'Ticket ID', 'Full Name', 'Issued At', 'Valid Until', 'Status', 'Entries', 'First Entry', 'Last Entry'
     ];
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1c304e').setFontColor('#FFFFFF');
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#0d1930').setFontColor('#FFFFFF').setHorizontalAlignment('center');
+    sheet.getRange(1, 2).setHorizontalAlignment('left');
+    sheet.setRowHeight(1, 38);
     sheet.setFrozenRows(1);
   }
 }

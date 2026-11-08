@@ -11,15 +11,12 @@ const WEBHOOK_TIMEOUT_MS = Number(process.env.GOOGLE_WEBHOOK_TIMEOUT_MS || 30000
 const SHEET_HEADERS = [
   'Ticket ID',
   'Full Name',
-  'Email',
-  'Phone',
   'Issued At',
   'Valid Until',
   'Status',
   'Entries',
   'First Entry',
-  'Last Entry',
-  'Email Status'
+  'Last Entry'
 ];
 
 function extractSpreadsheetId(input) {
@@ -75,15 +72,12 @@ function ticketToRow(t) {
   return [
     t.ticket_code || '',
     t.full_name || '',
-    t.email || '',
-    t.phone || '',
     t.issued_at || '',
     t.valid_until || '',
     t.status || 'valid',
     t.entry_count ?? 0,
     t.first_entry_at || '',
-    t.last_entry_at || '',
-    t.email_status || 'not_sent'
+    t.last_entry_at || ''
   ];
 }
 
