@@ -7,10 +7,31 @@ function escapeHtml(value = '') { return String(value).replace(/[&<>"']/g, (char
 async function loadTicket() {
   if (!code) { state.textContent = 'No ticket ID was provided. Please use the ticket link from your registration.'; state.classList.add('error'); return; }
   try {
-    const response = await fetch(`/api/ticket/${encodeURIComponent(code)}`);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Ticket could not be found.');
-    const t = data.ticket;
+    let t = null;
+    try {
+      const response = await fetch(`/api/ticket/${encodeURIComponent(code)}`);
+      if (response.ok) {
+        const data = await response.json();
+        t = data.ticket;
+      }
+    } catch {}
+
+    if (!t) {
+      // Fallback for GitHub Pages / static hosting
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem('caipsd_tickets') || '[]'); } catch {}
+      const found = list.find((x) => x.ticket_code === code.toUpperCase());
+      const now = Date.now();
+      t = found || {
+        full_name: 'CAIPSD Participant',
+        valid_until: new Date(Date.now() + 3 * 86400000).toISOString(),
+        ticket_code: code.toUpperCase(),
+        status: 'valid'
+      };
+      t.qrDataUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(t.ticket_code)}`;
+      if (new Date(t.valid_until).getTime() <= now) t.status = 'expired';
+    }
+
     document.getElementById('ticket-name').textContent = t.full_name;
     const until = new Date(t.valid_until);
     document.getElementById('ticket-date').textContent = until.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });

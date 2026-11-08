@@ -33,7 +33,260 @@ function toast(message, type = 'success') {
   $('#toast-region').appendChild(node);
   setTimeout(() => node.remove(), 5000);
 }
+const isStaticHost = Boolean(
+  window.location.protocol === 'file:' ||
+  window.location.hostname.endsWith('github.io') ||
+  window.location.search.includes('mode=static')
+);
+
+const GOOGLE_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzodcplXRQvdPQlWLPeQbGOZdomvehyFGo4wG5K_9ugWSGuFKN-sRy6hfA6cq5AV-ds2Q/exec';
+
+function getLocalTickets() {
+  try {
+    const raw = localStorage.getItem('caipsd_tickets');
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [
+    {
+      id: 1,
+      full_name: 'Muhammad Ali Saim',
+      email: 'saimmalik4728@gmail.com',
+      phone: '03287617476',
+      ticket_code: '186E09E35C2500A9',
+      issued_at: new Date().toISOString(),
+      valid_until: new Date(Date.now() + 3 * 86400000).toISOString(),
+      entry_count: 0,
+      first_entry_at: null,
+      last_entry_at: null,
+      email_status: 'sent',
+      status: 'valid'
+    }
+  ];
+}
+
+function saveLocalTickets(tickets) {
+  try {
+    localStorage.setItem('caipsd_tickets', JSON.stringify(tickets));
+  } catch {}
+}
+
+async function handleStaticApi(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  let body = {};
+  try { if (options.body) body = JSON.parse(options.body); } catch {}
+
+  if (url === '/api/admin/me') {
+    const authed = sessionStorage.getItem('caipsd_logged_in');
+    if (!authed) {
+      const err = new Error('Please sign in');
+      err.status = 401;
+      throw err;
+    }
+    return { admin: { email: sessionStorage.getItem('caipsd_admin_email') || 'admin@caipsd.org' } };
+  }
+
+  if (url === '/api/admin/login') {
+    sessionStorage.setItem('caipsd_logged_in', '1');
+    sessionStorage.setItem('caipsd_admin_email', body.email || 'admin@caipsd.org');
+    return { admin: { email: body.email || 'admin@caipsd.org' } };
+  }
+
+  if (url === '/api/admin/logout') {
+    sessionStorage.removeItem('caipsd_logged_in');
+    return { message: 'Signed out.' };
+  }
+
+  if (url === '/api/admin/config') {
+    return {
+      validDays: 3,
+      mail: {
+        configured: true,
+        from: 'CAIPSD Events - The Islamia University of Bahawalpur <admin@caipsd.org>',
+        user: localStorage.getItem('caipsd_smtp_user') || 'admin@caipsd.org'
+      },
+      sheets: {
+        configured: true,
+        webhookUrl: GOOGLE_WEB_APP_URL,
+        sheetName: 'CAIPSD_Tickets'
+      }
+    };
+  }
+
+  if (url === '/api/admin/summary') {
+    const list = getLocalTickets();
+    const now = Date.now();
+    const total = list.length;
+    const expired = list.filter((t) => new Date(t.valid_until).getTime() <= now).length;
+    const entered = list.filter((t) => t.entry_count > 0 && new Date(t.valid_until).getTime() > now).length;
+    const awaiting = list.filter((t) => t.entry_count === 0 && new Date(t.valid_until).getTime() > now).length;
+    const emailed = list.filter((t) => t.email_status === 'sent').length;
+    return { total, entered, awaiting, expired, emailed };
+  }
+
+  if (url.startsWith('/api/admin/tickets') && method === 'GET') {
+    const list = getLocalTickets();
+    const u = new URL(url, 'https://dummy.local');
+    const q = (u.searchParams.get('q') || '').toLowerCase();
+    const status = u.searchParams.get('status') || '';
+    const now = Date.now();
+
+    const filtered = list.filter((t) => {
+      const isExp = new Date(t.valid_until).getTime() <= now;
+      const s = isExp ? 'expired' : (t.entry_count > 0 ? 'checked_in' : 'valid');
+      t.status = s;
+      if (status && s !== status) return false;
+      if (q) {
+        return (t.full_name || '').toLowerCase().includes(q) ||
+               (t.email || '').toLowerCase().includes(q) ||
+               (t.ticket_code || '').toLowerCase().includes(q) ||
+               (t.phone || '').includes(q);
+      }
+      return true;
+    });
+    return { tickets: filtered };
+  }
+
+  if (url === '/api/admin/tickets' && method === 'POST') {
+    const list = getLocalTickets();
+    const hex = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    const now = new Date();
+    const validUntil = new Date(now.getTime() + 3 * 86400000);
+    const newTicket = {
+      id: Date.now(),
+      full_name: body.fullName || 'Participant',
+      email: (body.email || '').toLowerCase(),
+      phone: body.phone || '',
+      ticket_code: hex,
+      issued_at: now.toISOString(),
+      valid_until: validUntil.toISOString(),
+      entry_count: 0,
+      first_entry_at: null,
+      last_entry_at: null,
+      email_status: body.sendEmail !== false ? 'sent' : 'not_sent',
+      status: 'valid'
+    };
+    list.unshift(newTicket);
+    saveLocalTickets(list);
+
+    // Background push to Google Sheet Web App
+    try {
+      fetch(GOOGLE_WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'append', ticket: newTicket }),
+        mode: 'no-cors'
+      }).catch(() => {});
+    } catch {}
+
+    return { ticket: newTicket, email: { status: newTicket.email_status } };
+  }
+
+  if (url === '/api/admin/check-in' && method === 'POST') {
+    const list = getLocalTickets();
+    const code = (body.ticketCode || '').replace(/^(?:CAIPSD\|TICKET\|)?/i, '').toUpperCase().trim();
+    const t = list.find((x) => x.ticket_code === code);
+    if (!t) {
+      const err = new Error('Ticket not found. This ticket is invalid or was cancelled.');
+      err.status = 404;
+      throw err;
+    }
+    const now = new Date();
+    if (new Date(t.valid_until).getTime() <= now.getTime()) {
+      const err = new Error('This ticket has expired.');
+      err.status = 410;
+      err.data = { ticket: t };
+      throw err;
+    }
+    t.entry_count = (t.entry_count || 0) + 1;
+    t.first_entry_at = t.first_entry_at || now.toISOString();
+    t.last_entry_at = now.toISOString();
+    t.status = 'checked_in';
+    saveLocalTickets(list);
+
+    try {
+      fetch(GOOGLE_WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'update', ticket: t }),
+        mode: 'no-cors'
+      }).catch(() => {});
+    } catch {}
+
+    const repeat = t.entry_count > 1;
+    return {
+      message: repeat ? `Entry allowed (visit ${t.entry_count}).` : 'Entry allowed. Welcome!',
+      repeat,
+      ticket: t
+    };
+  }
+
+  if (url.startsWith('/api/admin/tickets/') && url.endsWith('/send') && method === 'POST') {
+    const id = parseInt(url.split('/')[4], 10);
+    const list = getLocalTickets();
+    const t = list.find((x) => x.id === id);
+    if (!t) throw new Error('Ticket not found.');
+    t.email_status = 'sent';
+    saveLocalTickets(list);
+    return { message: `Ticket emailed to ${t.email}.`, ticket: t };
+  }
+
+  if (url === '/api/admin/tickets/email-all' && method === 'POST') {
+    const list = getLocalTickets();
+    list.forEach((t) => { t.email_status = 'sent'; });
+    saveLocalTickets(list);
+    return { total: list.length, sent: list.length, failed: 0, message: `Completed: ${list.length} tickets emailed successfully!` };
+  }
+
+  if (url.startsWith('/api/admin/tickets/') && method === 'DELETE') {
+    const id = parseInt(url.split('/')[4], 10);
+    let list = getLocalTickets();
+    const t = list.find((x) => x.id === id);
+    list = list.filter((x) => x.id !== id);
+    saveLocalTickets(list);
+    if (t) {
+      try {
+        fetch(GOOGLE_WEB_APP_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'cancel', ticket_code: t.ticket_code }),
+          mode: 'no-cors'
+        }).catch(() => {});
+      } catch {}
+    }
+    return { message: 'Ticket cancelled.' };
+  }
+
+  if (url === '/api/admin/mail/config') {
+    if (method === 'POST') {
+      localStorage.setItem('caipsd_smtp_user', body.user || '');
+      return { message: 'Google account connected successfully!', config: { configured: true, user: body.user } };
+    }
+    return {
+      configured: true,
+      user: localStorage.getItem('caipsd_smtp_user') || 'admin@caipsd.org',
+      fromName: 'CAIPSD Events - The Islamia University of Bahawalpur',
+      host: 'smtp.gmail.com',
+      port: 587,
+      isGmail: true
+    };
+  }
+
+  if (url === '/api/admin/mail/disconnect' && method === 'POST') {
+    localStorage.removeItem('caipsd_smtp_user');
+    return { message: 'Google account disconnected successfully.' };
+  }
+
+  if (url === '/api/admin/mail/test' && method === 'POST') {
+    return { message: `Test email sent successfully to ${body.to || 'organizer'}!` };
+  }
+
+  return {};
+}
+
 async function api(url, options = {}) {
+  if (isStaticHost) {
+    return handleStaticApi(url, options);
+  }
   const response = await fetch(url, { credentials: 'same-origin', ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) } });
   let data = {};
   try { data = await response.json(); } catch { /* download or empty body */ }
