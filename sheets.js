@@ -296,6 +296,23 @@ async function cancelTicket(ticketCode) {
   }
 }
 
+async function sendTicketEmailViaSheet(ticket) {
+  const config = getSheetsConfig();
+  if (!config.webhookUrl) throw new Error('Google Web App URL is not configured.');
+  return sendWebhook('sendTicketEmail', {
+    ticket,
+    to: ticket.email,
+    ticketCode: ticket.ticket_code,
+    fullName: ticket.full_name
+  });
+}
+
+async function sendTestEmailViaSheet(to) {
+  const config = getSheetsConfig();
+  if (!config.webhookUrl) throw new Error('Google Web App URL is not configured.');
+  return sendWebhook('sendTestEmail', { to });
+}
+
 async function syncAllTickets(tickets) {
   const config = getSheetsConfig();
   if (!config.webhookUrl) {
@@ -491,6 +508,65 @@ function doPost(e) {
       return respondJson({ status: 'ok', tickets: tickets });
     }
 
+    if (action === 'sendTicketEmail' || action === 'sendEmail') {
+      var t = payload.ticket || {};
+      var recipient = payload.to || t.email;
+      if (!recipient) {
+        return respondJson({ status: 'error', message: 'Missing recipient email' });
+      }
+      var ticketCode = t.ticket_code || payload.ticketCode || '';
+      var name = t.full_name || payload.fullName || 'Participant';
+      var validUntil = t.valid_until || '';
+      var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=' + encodeURIComponent(ticketCode);
+      var viewLink = 'https://muhammadalisaim.github.io/caipsd-event-system/ticket.html?code=' + encodeURIComponent(ticketCode);
+
+      var html = '<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial,Helvetica,sans-serif;color:#18243a">' +
+        '<table width="100%" cellpadding="0" cellspacing="0" style="padding:28px 12px"><tr><td align="center">' +
+        '<table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e8ee;box-shadow:0 4px 16px rgba(0,0,0,0.06)">' +
+        '<tr><td style="background:linear-gradient(135deg, #1c304e 0%, #162740 100%);color:#ffffff;padding:26px 28px;border-bottom:3px solid #f59d14">' +
+        '<div style="font-size:11px;letter-spacing:2px;color:#f59d14;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>' +
+        '<div style="font-size:22px;font-weight:800;margin-top:6px;letter-spacing:-0.5px">CAIPSD Event Ticket</div>' +
+        '<div style="font-size:13px;color:#94a3b8;margin-top:2px">Official Admission & QR Pass</div>' +
+        '</td></tr>' +
+        '<tr><td style="padding:26px 28px">' +
+        '<p style="margin:0 0 14px;font-size:15px">Hello <strong>' + name + '</strong>,</p>' +
+        '<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#4a566b">Your official admission pass is confirmed. Show the QR pass below at the entrance for camera verification.</p>' +
+        '<div style="text-align:center;padding:20px;border:2px dashed #2b5fdc;background:#f8fafc;border-radius:12px">' +
+        '<img src="' + qrUrl + '" width="220" height="220" alt="Ticket QR code" style="display:block;margin:0 auto;border-radius:8px">' +
+        '<div style="margin-top:14px;font-family:Consolas,monospace;font-size:18px;letter-spacing:3px;font-weight:800;color:#1c304e">' + ticketCode + '</div>' +
+        '<div style="margin-top:4px;font-size:12px;color:#64748b;font-weight:600">Scan at entrance for fast check-in</div>' +
+        '</div>' +
+        '<p style="text-align:center;margin:24px 0 0"><a href="' + viewLink + '" style="background:#2b5fdc;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:13px;font-weight:700;display:inline-block">View Ticket Online & Download Pass</a></p>' +
+        '</td></tr>' +
+        '<tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;text-align:center">' +
+        'This ticket is issued by CAIPSD, The Islamia University of Bahawalpur.' +
+        '</td></tr>' +
+        '</table></td></tr></table></body></html>';
+
+      MailApp.sendEmail({
+        to: recipient,
+        subject: 'Your CAIPSD Event Pass - ' + ticketCode,
+        htmlBody: html
+      });
+
+      return respondJson({ status: 'ok', message: 'Ticket email delivered to ' + recipient });
+    }
+
+    if (action === 'sendTestEmail') {
+      var to = payload.to || (payload.ticket && payload.ticket.email) || ss.getOwner().getEmail();
+      MailApp.sendEmail({
+        to: to,
+        subject: 'CAIPSD Event System - Email Test',
+        htmlBody: '<div style="font-family:Arial,sans-serif;padding:20px;border-left:4px solid #2b5fdc;">' +
+          '<h2 style="color:#1c304e;">Google Account Connected!</h2>' +
+          '<p>This test email confirms that your Google Account is successfully connected to the CAIPSD Event Management Portal.</p>' +
+          '<p>You can now send ticket QR passes to all students in 1 click.</p>' +
+          '<p style="color:#64748b;font-size:12px;">CAIPSD Events - The Islamia University of Bahawalpur</p>' +
+          '</div>'
+      });
+      return respondJson({ status: 'ok', message: 'Test email delivered to ' + to });
+    }
+
     return respondJson({ status: 'error', message: 'Unknown action: ' + action });
   } catch (err) {
     return respondJson({ status: 'error', message: err.toString() });
@@ -579,5 +655,7 @@ module.exports = {
   cancelTicket,
   syncAllTickets,
   fetchTicketsFromSheet,
+  sendTicketEmailViaSheet,
+  sendTestEmailViaSheet,
   getAppsScriptTemplate
 };

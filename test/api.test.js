@@ -156,6 +156,8 @@ test('Google Sheets integration endpoints and configuration', async () => {
   const tpl = getAppsScriptTemplate();
   assert.ok(tpl.includes('function doPost(e)'));
   assert.ok(tpl.includes('action === \'syncAll\''));
+  assert.ok(tpl.includes('action === \'sendTicketEmail\''));
+  assert.ok(tpl.includes('action === \'sendTestEmail\''));
 
   const initial = getSheetsConfig();
   assert.equal(typeof initial.configured, 'boolean');

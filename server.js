@@ -18,6 +18,8 @@ const {
   cancelTicket: sheetsCancelTicket,
   syncAllTickets,
   fetchTicketsFromSheet,
+  sendTicketEmailViaSheet,
+  sendTestEmailViaSheet,
   getAppsScriptTemplate
 } = require('./sheets');
 
@@ -149,17 +151,35 @@ function getTicketByCode(code) { return db.prepare('SELECT * FROM tickets WHERE 
 function qrOptions(width) { return { width, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#14213D', light: '#FFFFFF' } }; }
 
 async function emailTicket(ticket) {
-  try {
-    const png = await QRCode.toBuffer(ticket.ticket_code, qrOptions(320));
-    await sendTicketEmail(ticket, png);
-    db.prepare("UPDATE tickets SET email_status='sent', emailed_at=?, email_error=NULL WHERE id=?").run(new Date().toISOString(), ticket.id);
-    return { status: 'sent' };
-  } catch (error) {
-    console.error('Ticket email failed:', error.message);
-    const message = cleanText(error.message, 300);
-    db.prepare("UPDATE tickets SET email_status='failed', email_error=? WHERE id=?").run(message, ticket.id);
-    return { status: 'failed', error: message };
+  let lastError = null;
+  if (mailConfigured()) {
+    try {
+      const png = await QRCode.toBuffer(ticket.ticket_code, qrOptions(320));
+      await sendTicketEmail(ticket, png);
+      db.prepare("UPDATE tickets SET email_status='sent', emailed_at=?, email_error=NULL WHERE id=?").run(new Date().toISOString(), ticket.id);
+      return { status: 'sent' };
+    } catch (error) {
+      console.warn('SMTP ticket email failed, attempting Google Web App fallback:', error.message);
+      lastError = error;
+    }
   }
+
+  // Fallback to attached Google Web App
+  try {
+    const config = getSheetsConfig();
+    if (config.webhookUrl) {
+      await sendTicketEmailViaSheet(ticket);
+      db.prepare("UPDATE tickets SET email_status='sent', emailed_at=?, email_error=NULL WHERE id=?").run(new Date().toISOString(), ticket.id);
+      return { status: 'sent' };
+    }
+  } catch (error) {
+    console.error('Google Web App ticket email fallback failed:', error.message);
+    if (!lastError) lastError = error;
+  }
+
+  const message = cleanText(lastError ? lastError.message : 'Email is not configured', 300);
+  db.prepare("UPDATE tickets SET email_status='failed', email_error=? WHERE id=?").run(message, ticket.id);
+  return { status: 'failed', error: message };
 }
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', app: 'CAIPSD Event Management' }));
@@ -533,19 +553,27 @@ app.post('/api/admin/mail/disconnect', requireAdmin, (req, res) => {
 
 app.post('/api/admin/mail/test', requireAdmin, async (req, res, next) => {
   try {
-    if (!mailConfigured()) {
-      return res.status(400).json({ error: 'Please connect your Google / Gmail account first.' });
-    }
     const cfg = getMailConfig();
     const to = cleanText(req.body.to, 180) || cfg.user || req.session.adminEmail;
     if (!validEmail(to)) {
       return res.status(400).json({ error: 'Please enter a valid recipient email address for the test.' });
     }
-    await sendTestEmail(to);
-    res.json({ message: `Test email sent successfully to ${to}!` });
-  } catch (error) {
-    res.status(502).json({ error: `Test email failed: ${error.message}` });
-  }
+    if (mailConfigured()) {
+      try {
+        await sendTestEmail(to);
+        return res.json({ message: `Test email sent successfully to ${to}!` });
+      } catch (smtpErr) {
+        console.warn('SMTP test email failed, attempting Google Web App fallback:', smtpErr.message);
+      }
+    }
+    // Fallback to attached Google Web App
+    try {
+      await sendTestEmailViaSheet(to);
+      return res.json({ message: `Test email sent successfully to ${to} via Google Web App!` });
+    } catch (sheetErr) {
+      return res.status(502).json({ error: `Test email failed: ${sheetErr.message}. Ensure your Google Account is connected.` });
+    }
+  } catch (error) { next(error); }
 });
 
 app.get('/api/admin/export.csv', requireAdmin, (req, res) => {
