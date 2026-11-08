@@ -458,6 +458,31 @@ async function pushTicketEmailToSheet(ticket) {
   const ticketCode = String(ticket.ticket_code || ticket.ticketCode || '').trim();
   const fullName = String(ticket.full_name || ticket.fullName || 'Participant').trim();
 
+  // Try GET request first - standard browser cross-origin friendly, no CORS preflight or POST redirect rewrite issues
+  const getUrl = `${GOOGLE_WEB_APP_URL}?action=sendTicketEmail&to=${encodeURIComponent(recipient)}&ticketCode=${encodeURIComponent(ticketCode)}&fullName=${encodeURIComponent(fullName)}&_t=${Date.now()}`;
+
+  let result = null;
+  let fetchError = null;
+
+  try {
+    const res = await fetch(getUrl, { cache: 'no-store' });
+    const text = await res.text();
+    try {
+      result = JSON.parse(text);
+    } catch {
+      if (text.includes('Ticket email delivered') || text.includes('"status":"ok"')) {
+        result = { status: 'ok', message: `Ticket emailed to ${recipient}` };
+      }
+    }
+  } catch (err) {
+    fetchError = err;
+  }
+
+  if (result && result.status === 'ok') {
+    return result;
+  }
+
+  // Fallback to POST
   const payload = {
     action: 'sendTicketEmail',
     sheetName: 'CAIPSD_Tickets',
@@ -472,8 +497,6 @@ async function pushTicketEmailToSheet(ticket) {
     }
   };
 
-  let result = null;
-  let fetchError = null;
   try {
     const res = await fetch(GOOGLE_WEB_APP_URL, {
       method: 'POST',
@@ -512,18 +535,47 @@ async function pushTicketEmailToSheet(ticket) {
 
 async function pushTestEmailToSheet(to) {
   if (!GOOGLE_WEB_APP_URL) return;
+  const recipient = String(to || '').trim().toLowerCase();
+  const getUrl = `${GOOGLE_WEB_APP_URL}?action=sendTestEmail&to=${encodeURIComponent(recipient)}&_t=${Date.now()}`;
+  let result = null;
+  let fetchError = null;
+
+  try {
+    const res = await fetch(getUrl, { cache: 'no-store' });
+    const text = await res.text();
+    try {
+      result = JSON.parse(text);
+    } catch {
+      if (text.includes('"status":"ok"') || text.includes('Test email delivered')) {
+        result = { status: 'ok', message: `Test email sent to ${recipient}` };
+      }
+    }
+  } catch (err) {
+    fetchError = err;
+  }
+
+  if (result && result.status === 'ok') {
+    return result;
+  }
+
   const payload = {
     action: 'sendTestEmail',
-    to: to
+    to: recipient
   };
-  let result = null;
+
   try {
     const res = await fetch(GOOGLE_WEB_APP_URL, {
       method: 'POST',
+      redirect: 'follow',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     });
-    result = await res.json().catch(() => null);
+    const text = await res.text();
+    try {
+      result = JSON.parse(text);
+    } catch {
+      if (text.includes('"status":"ok"')) result = { status: 'ok', message: `Test email sent to ${recipient}` };
+    }
   } catch (err) {
     try {
       await fetch(GOOGLE_WEB_APP_URL, {
@@ -532,6 +584,7 @@ async function pushTestEmailToSheet(to) {
         body: JSON.stringify(payload),
         mode: 'no-cors'
       });
+      result = { status: 'ok', message: `Test email dispatched to ${recipient}` };
     } catch {}
   }
   if (result && result.status === 'error') {
