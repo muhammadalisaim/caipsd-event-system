@@ -13,185 +13,268 @@
 </head>
 <body class="admin-body">
   <div id="login-screen" class="front-landing">
-    <!-- Top Navigation Bar (Clean & Functional) -->
+    <!-- Top Navigation Bar -->
     <header class="site-header" id="site-header">
       <div class="header-inner">
         <div class="header-brand">
           <a href="#portal-section" class="brand-link" data-scroll-tab="checkin">
             <img src="/assets/caipsd-logo-white.png" alt="CAIPSD Logo" class="header-logo-img" />
+            <div class="header-brand-info">
+              <span class="univ-tag">The Islamia University of Bahawalpur</span>
+              <span class="portal-tag">Event Operations &amp; Gate Pass</span>
+            </div>
           </a>
         </div>
-        <nav class="header-nav" id="header-nav">
-          <a href="#portal-section" class="nav-link active" data-scroll-tab="checkin">⌗ Gate Check-in</a>
-          <a href="#portal-section" class="nav-link" data-scroll-tab="login">🔐 Admin Sign In</a>
+
+        <!-- Center Segmented Switcher -->
+        <nav class="header-nav-center">
+          <div class="header-segmented-pill">
+            <button type="button" class="header-seg-tab active" id="tab-checkin-btn" data-front-tab="checkin">
+              <span class="seg-icon">⌗</span>
+              <span class="seg-text">Gate Check-in</span>
+              <span class="seg-status-dot"></span>
+            </button>
+            <button type="button" class="header-seg-tab" id="tab-login-btn" data-front-tab="login">
+              <span class="seg-icon">🔐</span>
+              <span class="seg-text">Admin Sign In</span>
+            </button>
+          </div>
         </nav>
+
         <div class="header-actions">
-          <button type="button" class="btn-nav-login" id="header-login-btn">🔐 Admin Sign In</button>
+          <div class="station-badge">
+            <span class="pulse-indicator"></span>
+            <span class="station-text">Station 01 · Live</span>
+          </div>
+          <button type="button" class="btn-header-admin" id="header-login-btn">
+            <span>🔐 Organizer Sign In</span>
+          </button>
           <button type="button" class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Toggle navigation">☰</button>
         </div>
       </div>
+
       <!-- Mobile dropdown menu -->
       <div class="mobile-nav-menu" id="mobile-nav-menu" hidden>
-        <a href="#portal-section" class="mobile-nav-link active" data-scroll-tab="checkin">⌗ Gate Entry Check-in</a>
-        <a href="#portal-section" class="mobile-nav-link" data-scroll-tab="login">🔐 Admin Portal Sign In</a>
+        <button type="button" class="mobile-nav-link active" data-scroll-tab="checkin">⌗ Gate Entry Check-in</button>
+        <button type="button" class="mobile-nav-link" data-scroll-tab="login">🔐 Admin Portal Sign In</button>
       </div>
     </header>
 
-    <!-- Event Entrance & Portal Access Section -->
-    <section id="portal-section" class="portal-section">
+    <!-- Main Operations Area -->
+    <main id="portal-section" class="portal-section">
       <div class="portal-container">
-        <div class="portal-heading-wrap">
-          <div class="portal-kicker">CAIPSD EVENT OPERATIONS</div>
-          <h2 class="portal-heading">Gate Check-in &amp; <em>Organizer Access.</em></h2>
-          <p class="portal-sub">Instant entrance gate QR verification and secure administrator management portal.</p>
-        </div>
-
-        <!-- Front Tabs Switcher -->
-        <div class="front-tabs-bar">
-          <div class="front-tabs" role="tablist">
-            <button type="button" class="front-tab active" id="tab-checkin-btn" data-front-tab="checkin">
-              <span class="front-tab-icon">⌗</span>
-              <span>Entry check-in</span>
-              <span class="front-tab-pill">Ready to scan</span>
-            </button>
-            <button type="button" class="front-tab" id="tab-login-btn" data-front-tab="login">
-              <span class="front-tab-icon">🔐</span>
-              <span>Admin Sign in</span>
-            </button>
-          </div>
-        </div>
 
         <!-- Active admin quick return banner -->
         <div id="admin-session-banner" class="admin-session-banner" style="display: none;">
-          <span>Signed in as <strong id="session-banner-email">admin@caipsd.org</strong></span>
-          <button type="button" id="return-admin-btn" class="admin-button admin-button-primary" style="height: 34px; padding: 0 14px; font-size: 0.82rem;">Open Admin Workspace →</button>
+          <div class="session-banner-left">
+            <span class="session-user-avatar">✓</span>
+            <span>Organizer Session Active: <strong id="session-banner-email">admin@caipsd.org</strong></span>
+          </div>
+          <button type="button" id="return-admin-btn" class="btn-session-return">Open Admin Workspace →</button>
         </div>
 
-        <!-- Tab 1: Gate Check-in -->
+        <!-- Tab 1: Gate Check-in Console -->
         <div id="front-checkin-panel" class="front-view-panel">
           <div class="front-checkin-card">
-            <div class="front-checkin-head">
-              <div>
-                <div class="admin-kicker">EVENT ENTRANCE</div>
-                <h2>Entry <em>check-in.</em></h2>
-                <p>Scan participant’s QR pass or enter 16-character ticket ID for instant admission.</p>
+            <!-- Console Header Bar -->
+            <div class="console-head">
+              <div class="console-title-wrap">
+                <div class="console-meta-kicker">
+                  <span class="kicker-live-dot"></span>
+                  <span>EVENT ENTRANCE ACCESS CONTROL</span>
+                </div>
+                <h1 class="console-title">Gate Entry Verification</h1>
+                <p class="console-desc">Scan attendee QR pass or enter 16-character Ticket ID for instant calendar-day validation.</p>
               </div>
-              <span class="live-indicator"><i></i> READY TO SCAN</span>
+              <div class="console-policy-pills">
+                <div class="policy-chip chip-green">
+                  <span class="chip-dot"></span>
+                  <span>1 Scan / Day Enforced</span>
+                </div>
+                <div class="policy-chip chip-blue">
+                  <span>Multi-Day Pass</span>
+                </div>
+              </div>
             </div>
 
+            <!-- Two Columns: QR Scanner & Manual Verification -->
             <div class="checkin-grid">
+              <!-- Left: Camera QR Scanner -->
               <section class="panel scanner-panel">
                 <div class="panel-heading">
-                  <div>
-                    <h2>Scan ticket QR</h2>
-                    <p>Allow camera access when your browser asks.</p>
+                  <div class="panel-title-with-icon">
+                    <div class="panel-icon-box">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <h2>Camera QR Scanner</h2>
+                      <p>Point camera at participant's QR pass</p>
+                    </div>
                   </div>
-                  <span class="scanner-badge">CAMERA</span>
+                  <span class="badge-scanner-live">CAMERA</span>
                 </div>
+
                 <div id="reader" class="qr-reader">
                   <div class="reader-placeholder">
-                    <div class="reader-frame"><span>⌗</span></div>
-                    <strong>Camera scanner</strong>
-                    <small>Start the scanner to read a ticket QR code.</small>
+                    <div class="reticle-frame">
+                      <span class="reticle-corner r-tl"></span>
+                      <span class="reticle-corner r-tr"></span>
+                      <span class="reticle-corner r-bl"></span>
+                      <span class="reticle-corner r-br"></span>
+                      <div class="reticle-center-icon">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                          <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+                          <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+                          <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+                          <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+                        </svg>
+                      </div>
+                    </div>
+                    <strong>Scanner Standby</strong>
+                    <small>Click "Start Camera Scanner" below to activate camera.</small>
                   </div>
                 </div>
+
                 <div class="scanner-controls">
-                  <button id="start-scanner" class="admin-button admin-button-primary">Start camera scanner</button>
-                  <button id="stop-scanner" class="admin-button admin-button-light" disabled>Stop</button>
+                  <button id="start-scanner" class="btn-camera-start" type="button">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    <span>Start Camera Scanner</span>
+                  </button>
+                  <button id="stop-scanner" class="btn-camera-stop" type="button" disabled>
+                    <span>Stop</span>
+                  </button>
                 </div>
                 <div id="scanner-message" class="scanner-message" role="status"></div>
               </section>
 
+              <!-- Right: Manual Code Verification -->
               <section class="panel manual-panel">
                 <div class="panel-heading">
-                  <div>
-                    <h2>Manual check-in</h2>
-                    <p>Use this if the QR code cannot be scanned.</p>
+                  <div class="panel-title-with-icon">
+                    <div class="panel-icon-box">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="4" width="20" height="16" rx="2"/>
+                        <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <h2>Manual Entry</h2>
+                      <p>For printed badges or unreadable QR codes</p>
+                    </div>
                   </div>
+                  <span class="badge-scanner-manual">KEYBOARD</span>
                 </div>
+
                 <form id="manual-checkin-form" class="manual-form">
-                  <label for="ticket-code-input">Ticket ID</label>
-                  <div class="manual-input-row">
-                    <input id="ticket-code-input" name="ticketCode" required maxlength="40" placeholder="Enter 16-character ticket ID">
-                    <button class="admin-button admin-button-primary" type="submit">Verify & allow entry</button>
+                  <label for="ticket-code-input" class="manual-field-label">
+                    <span>Ticket ID Code</span>
+                    <span class="field-spec">16 characters</span>
+                  </label>
+                  <div class="manual-input-group">
+                    <div class="ticket-input-wrapper">
+                      <span class="ticket-prefix-icon">🎟</span>
+                      <input id="ticket-code-input" name="ticketCode" required maxlength="40" placeholder="e.g. CAIP-7B3F-9K2L-8M4N" autocomplete="off" spellcheck="false">
+                    </div>
+                    <button class="btn-manual-verify" type="submit">
+                      <span>Verify &amp; Admit</span>
+                      <span class="btn-arrow">→</span>
+                    </button>
                   </div>
                 </form>
-                <div class="manual-tip">
-                  <span>✳</span>
-                  <p>A ticket allows <b>1 entry per calendar day</b> up to the event duration (2, 3, or 4 days). Expired or repeated scans on the same day are rejected.</p>
+
+                <div class="gate-policy-banner">
+                  <div class="policy-icon-circle">🛡</div>
+                  <div class="policy-banner-content">
+                    <strong>1 Entry Per Calendar Day Limit</strong>
+                    <p>Tickets permit only 1 admission per day across the event period. Subsequent attempts on the same calendar day are flagged and rejected.</p>
+                  </div>
                 </div>
+
                 <div id="checkin-result" class="checkin-result empty-result">
-                  <div class="result-icon">✓</div>
-                  <strong>Ready for a ticket</strong>
-                  <small>Scan results will appear here.</small>
+                  <div class="result-idle-box">
+                    <div class="idle-ticket-icon">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/>
+                        <path d="M13 5v2M13 11v2M13 17v2"/>
+                      </svg>
+                    </div>
+                    <div class="idle-info">
+                      <strong>Awaiting Ticket Verification</strong>
+                      <small>Scan a QR code or submit a Ticket ID above to verify entrance permission.</small>
+                    </div>
+                  </div>
                 </div>
               </section>
             </div>
 
-            <section class="attendance-note">
-              <span>i</span>
-              <p><strong>Event-day tip</strong> Keep this page open at the entrance. The scanner works on <b>localhost</b> or a secure <b>HTTPS</b> website, and camera permission must be allowed in the browser.</p>
-            </section>
+            <!-- Console Status Footer -->
+            <div class="console-footer">
+              <div class="footer-stat-item">
+                <span class="stat-bullet">●</span>
+                <span>Camera scanner runs locally in-browser</span>
+              </div>
+              <div class="footer-stat-item">
+                <span class="stat-bullet">●</span>
+                <span>Google Sheets attendance backup synced</span>
+              </div>
+              <div class="footer-stat-item">
+                <span class="stat-bullet">●</span>
+                <span>The Islamia University of Bahawalpur</span>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- Tab 2: Admin Sign in -->
         <div id="front-login-panel" class="front-view-panel" style="display: none;">
-          <div class="login-card">
-            <div class="login-card-brand">
-              <img src="/assets/caipsd-logo.png" alt="CAIPSD Logo" class="login-card-logo" />
-              <span class="univ-subtext">The Islamia University of Bahawalpur</span>
+          <div class="login-card-pro">
+            <div class="login-header-banner">
+              <img src="/assets/caipsd-logo.png" alt="CAIPSD Logo" class="login-logo-img" />
+              <div class="login-univ-subtext">The Islamia University of Bahawalpur</div>
+              <div class="login-kicker-tag">EVENT OPERATIONS CONSOLE</div>
             </div>
-            <div class="login-form-wrap">
-              <div class="login-kicker">WELCOME BACK</div>
-              <h2>Sign in to<br>your <em>workspace.</em></h2>
-              <p>Use your organizer credentials to issue tickets and manage event entry.</p>
-              <form id="login-form" class="admin-form">
-                <label>Email address
-                  <input type="email" name="email" required autocomplete="username" placeholder="admin@caipsd.org" value="admin@caipsd.org">
-                </label>
-                <label>Password
-                  <input type="password" name="password" required autocomplete="current-password" placeholder="Enter your password">
-                </label>
+
+            <div class="login-body">
+              <h2 class="login-card-title">Organizer Sign In</h2>
+              <p class="login-card-desc">Sign in with authorized credentials to issue tickets, configure duration, and manage event entry.</p>
+
+              <form id="login-form" class="login-form-pro">
+                <div class="form-group">
+                  <label for="login-email">Email address</label>
+                  <div class="field-input-box">
+                    <span class="field-icon">✉</span>
+                    <input type="email" id="login-email" name="email" required autocomplete="username" placeholder="admin@caipsd.org" value="admin@caipsd.org">
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="login-password">Password</label>
+                  <div class="field-input-box">
+                    <span class="field-icon">🔒</span>
+                    <input type="password" id="login-password" name="password" required autocomplete="current-password" placeholder="Enter administrator password">
+                  </div>
+                </div>
                 <div id="login-error" class="inline-error" role="alert"></div>
-                <button class="admin-button admin-button-primary full-width" type="submit" id="login-button">Sign in <span>→</span></button>
+                <button class="btn-login-submit" type="submit" id="login-button">
+                  <span>Sign in to Workspace</span>
+                  <span class="btn-arrow">→</span>
+                </button>
               </form>
+
+              <div class="login-help-footer">
+                <span class="help-label">Default Account:</span>
+                <code>admin@caipsd.org</code>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
 
-    <!-- Floating Chat Button (Only on Public Page) -->
-    <button type="button" class="floating-chat-btn" id="floating-chat-btn" aria-label="AI Help &amp; Support" title="CAIPSD AI Assistant">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 10H6v-2h12v2zm0-3H6V7h12v2z"/>
-      </svg>
-    </button>
-
-    <!-- Interactive AI Assistant Modal -->
-    <div id="ai-chat-card" class="ai-chat-card" hidden>
-      <div class="ai-chat-head">
-        <div class="ai-chat-brand">
-          <div class="ai-chat-avatar">✦</div>
-          <div>
-            <strong>CAIPSD AI Assistant</strong>
-            <small>The Islamia University of Bahawalpur</small>
-          </div>
-        </div>
-        <button type="button" class="ai-chat-close" id="ai-chat-close" aria-label="Close">×</button>
       </div>
-      <div class="ai-chat-body">
-        <p>Assalam-o-Alaikum! Welcome to the <strong>CAIPSD Event Portal</strong>. How can I assist you?</p>
-        <div class="ai-chat-options">
-          <button type="button" class="ai-opt-btn" id="ai-opt-checkin">⌗ Gate Check-in &amp; Scanner</button>
-          <button type="button" class="ai-opt-btn" id="ai-opt-login">🔐 Organizer Workspace Login</button>
-          <button type="button" class="ai-opt-btn" id="ai-opt-rules">📅 Event Duration Policy</button>
-          <button type="button" class="ai-opt-btn" id="ai-opt-support">📞 Contact Event Organizers</button>
-        </div>
-        <div id="ai-chat-answer" class="ai-chat-answer" style="display:none;"></div>
-      </div>
-    </div>
+    </main>
   </div>
 
   <!-- Admin SaaS Workspace (Distraction-Free) -->

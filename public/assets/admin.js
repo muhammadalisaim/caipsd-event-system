@@ -727,7 +727,7 @@ function setFrontTab(tabName) {
   const isCheckin = tabName === 'checkin';
   $('#tab-checkin-btn')?.classList.toggle('active', isCheckin);
   $('#tab-login-btn')?.classList.toggle('active', !isCheckin);
-  document.querySelectorAll('.header-nav .nav-link, .mobile-nav-link').forEach((link) => {
+  document.querySelectorAll('[data-scroll-tab]').forEach((link) => {
     const linkTab = link.getAttribute('data-scroll-tab');
     if (linkTab) {
       link.classList.toggle('active', linkTab === tabName);
@@ -737,6 +737,10 @@ function setFrontTab(tabName) {
   if ($('#front-login-panel')) $('#front-login-panel').style.display = isCheckin ? 'none' : 'flex';
   if (!isCheckin) {
     stopScanner();
+    setTimeout(() => {
+      const pwd = $('#login-password') || $('#login-form input[name="password"]');
+      if (pwd) pwd.focus();
+    }, 120);
   } else {
     $('#ticket-code-input')?.focus();
   }
@@ -747,7 +751,7 @@ function showLogin() {
   $('#admin-app').hidden = true;
   $('#login-screen').hidden = false;
   if ($('#admin-session-banner')) $('#admin-session-banner').style.display = 'none';
-  if ($('#header-login-btn')) $('#header-login-btn').textContent = 'Login';
+  if ($('#header-login-btn')) $('#header-login-btn').textContent = '🔐 Organizer Sign In';
   $('#login-error').textContent = '';
   $('#login-form').reset();
   setFrontTab('checkin');
@@ -761,7 +765,7 @@ function showApp(email) {
   $('#admin-email').textContent = email || 'Organizer';
   $('#admin-avatar').textContent = (email || 'A').charAt(0).toUpperCase();
   if ($('#session-banner-email')) $('#session-banner-email').textContent = email || 'Organizer';
-  if ($('#header-login-btn')) $('#header-login-btn').textContent = 'Admin Workspace →';
+  if ($('#header-login-btn')) $('#header-login-btn').textContent = '⚡ Workspace →';
   loadConfig().then(loadDashboard);
 }
 
@@ -819,50 +823,6 @@ document.querySelectorAll('[data-scroll-tab]').forEach((el) => {
     $('#mobile-nav-menu')?.setAttribute('hidden', '');
     document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
   });
-});
-
-// Floating AI Chat
-function toggleAiChat() {
-  const card = $('#ai-chat-card');
-  if (!card) return;
-  card.hidden = !card.hidden;
-}
-$('#floating-chat-btn')?.addEventListener('click', toggleAiChat);
-$('#ai-chat-close')?.addEventListener('click', () => {
-  const card = $('#ai-chat-card');
-  if (card) card.hidden = true;
-});
-
-$('#ai-opt-checkin')?.addEventListener('click', () => {
-  const card = $('#ai-chat-card');
-  if (card) card.hidden = true;
-  setFrontTab('checkin');
-  document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
-});
-$('#ai-opt-login')?.addEventListener('click', () => {
-  const card = $('#ai-chat-card');
-  if (card) card.hidden = true;
-  setFrontTab('login');
-  document.getElementById('portal-section')?.scrollIntoView({ behavior: 'smooth' });
-});
-$('#ai-opt-rules')?.addEventListener('click', () => {
-  const ans = $('#ai-chat-answer');
-  if (!ans) return;
-  ans.style.display = 'block';
-  ans.innerHTML = `<strong>📅 Event Validity Policy:</strong><br>
-  • Har ticket par <strong>1 calendar day mein sirf 1 scan</strong> allowed hai.<br>
-  • Total event duration portal se set ki ja sakti hai (jaise 2, 3, ya 4 din).<br>
-  • Same day par repeat scan ya validity khatam hone par ticket block hota hai.`;
-});
-$('#ai-opt-support')?.addEventListener('click', () => {
-  const ans = $('#ai-chat-answer');
-  if (!ans) return;
-  ans.style.display = 'block';
-  ans.innerHTML = `<strong>📞 Event Organizer Support:</strong><br>
-  Centre of AI &amp; Professional Skills Development (CAIPSD)<br>
-  The Islamia University of Bahawalpur<br>
-  Email: <code>admin@caipsd.org</code><br>
-  Google Sheets Auto-Sync: <strong>Active ✓</strong>`;
 });
 
 $('#login-form').addEventListener('submit', async (event) => {
@@ -1491,13 +1451,30 @@ $('#bulk-form')?.addEventListener('submit', async (event) => {
   }
 });
 
-/* ---- Entry check-in ---- */
 function showCheckinResult(type, message, ticket = null, extra = '') {
   const result = $('#checkin-result');
   result.className = `checkin-result ${type}`;
-  const icon = type === 'success' ? '✓' : type === 'warning' ? '!' : '×';
-  const detail = ticket ? `<small>${escapeHtml(ticket.full_name)}<br>Ticket: ${escapeHtml(ticket.ticket_code)} · Valid until ${escapeHtml(dateTimeLabel(ticket.valid_until))}${extra ? `<br>${escapeHtml(extra)}` : ''}</small>` : '<small>Please check the ticket and try again.</small>';
-  result.innerHTML = `<div class="result-icon">${icon}</div><strong>${escapeHtml(message)}</strong>${detail}`;
+  const icon = type === 'success' ? '✓' : type === 'warning' ? '⚠' : '✕';
+  let detailHtml = '';
+  if (ticket) {
+    detailHtml = `
+      <div class="result-ticket-details">
+        <div class="result-attendee-name">${escapeHtml(ticket.full_name)}</div>
+        <div class="result-ticket-meta">
+          <span class="meta-code">Ticket: <code>${escapeHtml(ticket.ticket_code)}</code></span>
+          <span class="meta-date">Valid: ${escapeHtml(dateTimeLabel(ticket.valid_until))}</span>
+        </div>
+        ${extra ? `<div class="result-ticket-status-pill">${escapeHtml(extra)}</div>` : ''}
+      </div>`;
+  } else {
+    detailHtml = `<small class="result-hint">Check ticket credentials and verify attendance records.</small>`;
+  }
+  result.innerHTML = `
+    <div class="result-icon-badge">${icon}</div>
+    <div class="result-body-wrap">
+      <strong class="result-headline">${escapeHtml(message)}</strong>
+      ${detailHtml}
+    </div>`;
 }
 async function performCheckin(ticketCode) {
   const cleaned = extractTicketCode(ticketCode);
