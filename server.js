@@ -529,12 +529,24 @@ async function handleCheckinRequest(req, res, next) {
 
     // 2. 1 scan per calendar day
     const todayLocal = getLocalDateString(now);
+    const todayIso = now.toISOString().slice(0, 10);
     const pastEntries = db.prepare('SELECT scanned_at FROM entries WHERE ticket_id = ? ORDER BY id ASC').all(ticket.id);
-    const alreadyScannedToday = pastEntries.some((entry) => getLocalDateString(new Date(entry.scanned_at)) === todayLocal);
+    let alreadyScannedToday = false;
+    if (pastEntries.length > 0) {
+      alreadyScannedToday = pastEntries.some((entry) => {
+        const d = new Date(entry.scanned_at);
+        return getLocalDateString(d) === todayLocal || entry.scanned_at.slice(0, 10) === todayIso;
+      });
+    } else if (ticket.last_entry_at) {
+      const d = new Date(ticket.last_entry_at);
+      if (getLocalDateString(d) === todayLocal || ticket.last_entry_at.slice(0, 10) === todayIso) {
+        alreadyScannedToday = true;
+      }
+    }
 
     if (alreadyScannedToday) {
       return res.status(409).json({
-        error: 'This ticket is already used today! 1 din mein sirf 1 baar entry allowed hai.',
+        error: 'Already used ticket! Yeh ticket aaj pehle hi use ho chuka hai (1 din mein sirf 1 bar scan ho sakta hai). Next day dobara scan ho sakega.',
         alreadyUsed: true,
         alreadyScannedToday: true,
         maxDays,

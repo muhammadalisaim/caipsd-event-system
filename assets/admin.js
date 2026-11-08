@@ -83,13 +83,23 @@ function extractTicketCode(raw) {
   return text.replace(/^(?:CAIPSD\|TICKET\|)?/i, '').trim().toUpperCase();
 }
 
+function isSameCalendarDay(d1, d2) {
+  if (!d1 || !d2) return false;
+  const a = new Date(d1);
+  const b = new Date(d2);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return false;
+  const localMatch = a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const utcMatch = a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth() && a.getUTCDate() === b.getUTCDate();
+  return localMatch || utcMatch;
+}
+
 function getGoogleWebAppUrl() {
   return localStorage.getItem('caipsd_sheets_webhook_url') || GOOGLE_WEB_APP_URL;
 }
 
 function pushTicketToSheet(ticket, type = 'appendTicket') {
   const url = getGoogleWebAppUrl();
-  if (!ticket || !url) return;
+  if (!ticket || !url) return Promise.resolve({ status: 'skipped' });
   const row = [
     `'${ticket.ticket_code}`,
     ticket.full_name || '',
@@ -107,14 +117,29 @@ function pushTicketToSheet(ticket, type = 'appendTicket') {
     ticket: ticket,
     row: row
   };
-  try {
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      mode: 'no-cors'
-    }).catch(() => {});
-  } catch {}
+  return fetch(url, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  }).then(async (res) => {
+    try {
+      const data = await res.json();
+      return data;
+    } catch {
+      return { status: 'ok' };
+    }
+  }).catch(async () => {
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        mode: 'no-cors'
+      });
+    } catch {}
+    return { status: 'ok' };
+  });
 }
 
 async function syncAllTicketsToSheet(tickets) {
@@ -605,15 +630,15 @@ async function handleStaticApi(url, options = {}) {
     let list = getLocalTickets();
     let t = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === code);
 
-    if (!t) {
-      try {
-        const synced = await syncTicketsFromGoogleSheet();
-        if (synced && synced.length) {
-          list = synced;
-          t = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === code);
-        }
-      } catch {}
-    }
+    // Sync latest status from Google Sheet before checkin to guarantee cross-device consistency
+    try {
+      const synced = await syncTicketsFromGoogleSheet();
+      if (synced && synced.length) {
+        list = synced;
+        const fresh = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === code);
+        if (fresh) t = fresh;
+      }
+    } catch {}
 
     if (!t) {
       const err = new Error('Ticket not found. This ticket is invalid or was cancelled.');
@@ -638,28 +663,32 @@ async function handleStaticApi(url, options = {}) {
 
     const maxDays = Number(t.max_days) || 2;
     if ((t.entry_count || 0) >= maxDays) {
-      const err = new Error(`This ticket is already used! Yeh ticket pehle hi all ${maxDays} din (${maxDays} entries) use ho chuka hai.`);
+      const err = new Error(`Already used ticket! Yeh ticket pehle hi all ${maxDays} din (${maxDays} entries) use ho chuka hai.`);
       err.status = 409;
       err.data = { ticket: t, limitReached: true, alreadyUsed: true, maxDays };
       throw err;
     }
 
-    const todayStr = (new Date()).toISOString().slice(0, 10);
-    const lastEntryStr = t.last_entry_at ? (new Date(t.last_entry_at)).toISOString().slice(0, 10) : null;
-    const entryDates = Array.isArray(t.entry_dates) ? t.entry_dates : (lastEntryStr ? [lastEntryStr] : []);
+    // 1-scan-per-calendar-day enforcement: check both local timezone and UTC date
+    const alreadyUsedToday = (Number(t.entry_count || 0) > 0) && (
+      isSameCalendarDay(t.last_entry_at, now) ||
+      isSameCalendarDay(t.first_entry_at, now) ||
+      (Array.isArray(t.entry_dates) && t.entry_dates.some((ed) => isSameCalendarDay(ed, now)))
+    );
 
-    if (entryDates.includes(todayStr) || lastEntryStr === todayStr) {
-      const err = new Error('This ticket is already used today! 1 din mein sirf 1 bar entry allowed hai.');
+    if (alreadyUsedToday) {
+      const err = new Error('Already used ticket! Yeh ticket aaj pehle hi use ho chuka hai (1 din mein sirf 1 bar scan ho sakta hai). Next day dobara scan ho sakega.');
       err.status = 409;
       err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
       throw err;
     }
 
+    const todayStr = now.toISOString().slice(0, 10);
     t.entry_count = (t.entry_count || 0) + 1;
     t.first_entry_at = t.first_entry_at || now.toISOString();
     t.last_entry_at = now.toISOString();
     if (!Array.isArray(t.entry_dates)) {
-      t.entry_dates = lastEntryStr ? [lastEntryStr] : [];
+      t.entry_dates = [];
     }
     if (!t.entry_dates.includes(todayStr)) {
       t.entry_dates.push(todayStr);
@@ -667,7 +696,20 @@ async function handleStaticApi(url, options = {}) {
     t.status = 'checked_in';
     saveLocalTickets(list);
 
-    pushTicketToSheet(t, 'updateTicket');
+    try {
+      const sheetRes = await pushTicketToSheet(t, 'updateTicket');
+      if (sheetRes && (sheetRes.status === 'already_used' || sheetRes.alreadyUsed)) {
+        t.entry_count = Math.max(0, t.entry_count - 1);
+        saveLocalTickets(list);
+        const err = new Error(sheetRes.message || 'Already used ticket! 1 din mein sirf 1 bar entry allowed hai. Next day dobara scan ho sakega.');
+        err.status = 409;
+        err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
+        throw err;
+      }
+    } catch (sheetErr) {
+      if (sheetErr && sheetErr.status === 409) throw sheetErr;
+      console.warn('Sheet push non-critical warning:', sheetErr);
+    }
 
     const dayNumber = t.entry_count;
     const isFinalDay = dayNumber >= maxDays;
@@ -1609,11 +1651,14 @@ async function performCheckin(ticketCode) {
       (error.data && (error.data.alreadyUsed || error.data.alreadyScannedToday || error.data.limitReached)) ||
       (error.message && (error.message.includes('already used') || error.message.includes('Already used') || error.message.includes('pehle hi use') || error.message.includes('limit reached')))
     );
-    const displayMsg = isAlreadyUsed
-      ? 'This ticket is already used today! (Entry Denied)'
+    const displayHeadline = isAlreadyUsed
+      ? 'Already used ticket! (Entry Denied)'
       : error.message;
-    showCheckinResult(isAlreadyUsed ? 'warning' : 'error', displayMsg, error.data && error.data.ticket, isAlreadyUsed ? 'ENTRY DENIED · ALREADY USED TODAY' : '');
-    note.textContent = displayMsg;
+    const noteText = isAlreadyUsed
+      ? (error.message || 'Already used ticket! Yeh ticket aaj pehle hi use ho chuka hai (1 din mein sirf 1 bar scan ho sakta hai). Next day dobara scan ho sakega.')
+      : error.message;
+    showCheckinResult(isAlreadyUsed ? 'warning' : 'error', displayHeadline, error.data && error.data.ticket, isAlreadyUsed ? 'ALREADY USED TICKET · ENTRY DENIED' : '');
+    note.textContent = noteText;
     note.className = isAlreadyUsed ? 'scanner-message warning' : 'scanner-message error';
   }
 }

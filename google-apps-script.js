@@ -271,6 +271,46 @@ function doPost(e) {
         var rowIndex = findRowByTicketCode(sheet, ticketCode);
         var cols = Math.min(updatedRow.length, sheet.getLastColumn());
         if (rowIndex > 0) {
+          var existingData = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+          var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+          var entriesColIdx = 5;
+          var lastEntryColIdx = 7;
+          for (var h = 0; h < headers.length; h++) {
+            var hName = String(headers[h] || '').trim().toLowerCase();
+            if (hName === 'entries') entriesColIdx = h;
+            if (hName === 'last entry') lastEntryColIdx = h;
+          }
+
+          var existingLastEntry = String(existingData[lastEntryColIdx] || '').trim();
+          var existingEntries = Number(existingData[entriesColIdx] || 0);
+
+          var newLastEntry = String(updatedRow[lastEntryColIdx] || '').trim();
+          var newEntries = Number(updatedRow[entriesColIdx] || 0);
+
+          if (existingLastEntry && existingEntries > 0) {
+            var existingDay = '';
+            try {
+              existingDay = (new Date(existingLastEntry)).toISOString().slice(0, 10);
+            } catch (e) {
+              existingDay = String(existingLastEntry).slice(0, 10);
+            }
+            var incomingDay = '';
+            try {
+              incomingDay = (new Date(newLastEntry || new Date())).toISOString().slice(0, 10);
+            } catch (e) {
+              incomingDay = String(newLastEntry || '').slice(0, 10);
+            }
+            if (existingDay && incomingDay && existingDay === incomingDay && newEntries > existingEntries) {
+              return respondJson({
+                status: 'already_used',
+                alreadyUsed: true,
+                alreadyScannedToday: true,
+                message: 'Already used ticket! 1 din mein sirf 1 bar entry allowed hai. Next day dobara scan ho sakega.',
+                entries: existingEntries
+              });
+            }
+          }
+
           sheet.getRange(rowIndex, 1, 1, cols).setValues([updatedRow.slice(0, cols)]);
           return respondJson({ status: 'ok', message: 'Row updated.' });
         } else {
@@ -296,24 +336,10 @@ function doPost(e) {
       if (data.length <= 1) {
         return respondJson({ status: 'ok', tickets: [] });
       }
-      var headers = data[0];
       var tickets = [];
       for (var i = 1; i < data.length; i++) {
-        var r = data[i];
-        if (!r[0]) continue;
-        tickets.push({
-          ticket_code: String(r[0]).replace(/^'/, '').trim(),
-          full_name: String(r[1] || ''),
-          email: String(r[2] || ''),
-          phone: String(r[3] || ''),
-          issued_at: String(r[4] || ''),
-          valid_until: String(r[5] || ''),
-          status: String(r[6] || 'valid'),
-          entry_count: Number(r[7] || 0),
-          first_entry_at: String(r[8] || ''),
-          last_entry_at: String(r[9] || ''),
-          email_status: String(r[10] || 'not_sent')
-        });
+        var parsed = parseSheetRow(data[i]);
+        if (parsed) tickets.push(parsed);
       }
       return respondJson({ status: 'ok', tickets: tickets });
     }
