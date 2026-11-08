@@ -140,10 +140,20 @@ function normalizeEmail(value) { return cleanText(value, 180).toLowerCase(); }
 function validPhone(value) { return /^\+?[0-9][0-9\s\-()]{6,28}$/.test(value); }
 function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }
 function escapeLike(value) { return value.replace(/[\\%_]/g, (c) => `\\${c}`); }
+function getLocalDateString(date = new Date(), timeZone = process.env.EVENT_TIMEZONE || 'Asia/Karachi') {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+const cancelledCodes = new Set();
 
 function ticketStatus(row, now = Date.now()) {
   if (new Date(row.valid_until).getTime() <= now) return 'expired';
-  return row.entry_count > 0 ? 'checked_in' : 'valid';
+  if (row.entry_count >= 2) return 'completed';
+  if (row.entry_count === 1) return 'checked_in';
+  return 'valid';
 }
 function serializeTicket(row) { return { ...row, status: ticketStatus(row) }; }
 function publicTicket(row) {
@@ -289,9 +299,10 @@ app.get('/api/admin/summary', requireAdmin, (req, res) => {
   const total = count('SELECT COUNT(*) AS count FROM tickets');
   const expired = count('SELECT COUNT(*) AS count FROM tickets WHERE valid_until <= ?', now);
   const entered = count('SELECT COUNT(*) AS count FROM tickets WHERE entry_count > 0 AND valid_until > ?', now);
+  const day1Entered = count('SELECT COUNT(*) AS count FROM tickets WHERE entry_count = 1 AND valid_until > ?', now);
+  const day2Entered = count('SELECT COUNT(*) AS count FROM tickets WHERE entry_count >= 2 AND valid_until > ?', now);
   const awaiting = count('SELECT COUNT(*) AS count FROM tickets WHERE entry_count = 0 AND valid_until > ?', now);
-  const emailed = count("SELECT COUNT(*) AS count FROM tickets WHERE email_status = 'sent'");
-  res.json({ total, entered, awaiting, expired, emailed });
+  res.json({ total, entered, day1Entered, day2Entered, awaiting, expired });
 });
 
 app.get('/api/admin/tickets', requireAdmin, (req, res) => {
@@ -315,99 +326,71 @@ app.get('/api/admin/tickets', requireAdmin, (req, res) => {
 app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
   try {
     const fullName = cleanText(req.body.fullName, 100);
-    const email = normalizeEmail(req.body.email);
+    const email = cleanText(req.body.email, 180).toLowerCase();
     const phone = cleanText(req.body.phone, 30);
-    if (!fullName || !email || !phone) return res.status(400).json({ error: 'Please enter the participant name, email and phone number.' });
-    if (fullName.length < 2) return res.status(400).json({ error: 'Please enter the full name.' });
-    if (!validEmail(email)) return res.status(400).json({ error: 'Please enter a valid email address.' });
-    if (!validPhone(phone)) return res.status(400).json({ error: 'Please enter a valid phone number (digits, spaces, + - and brackets only).' });
-    const existing = db.prepare('SELECT * FROM tickets WHERE email = ?').get(email);
-    if (existing) return res.status(409).json({ error: 'A ticket has already been issued to this email address.', ticket: serializeTicket(existing) });
+    if (!fullName || fullName.length < 2) {
+      return res.status(400).json({ error: 'Please enter the participant full name.' });
+    }
 
     const issued = new Date();
     const validUntil = new Date(issued.getTime() + TICKET_VALID_DAYS * 24 * 60 * 60 * 1000);
     const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
     const result = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(fullName, email, phone, ticketCode, issued.toISOString(), validUntil.toISOString());
-    let ticket = getTicketById(Number(result.lastInsertRowid));
-
-    const wantsEmail = req.body.sendEmail !== false && req.body.sendEmail !== 'false';
-    const emailResult = wantsEmail && emailAvailable() ? await emailTicket(ticket) : { status: 'not_sent', skipped: wantsEmail ? 'not_configured' : 'declined' };
-    ticket = getTicketById(ticket.id);
+      .run(fullName, email || '', phone || '', ticketCode, issued.toISOString(), validUntil.toISOString());
+    const ticket = getTicketById(Number(result.lastInsertRowid));
 
     // Auto-sync ticket to Google Sheet in background
     sheetsAppendTicket(serializeTicket(ticket)).catch((err) => console.error('Sheet append error:', err.message));
 
-    res.status(201).json({ ticket: serializeTicket(ticket), email: emailResult });
+    res.status(201).json({ ticket: serializeTicket(ticket) });
   } catch (error) { next(error); }
 });
 
-app.post('/api/admin/tickets/:id/send', requireAdmin, async (req, res, next) => {
+app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
-    const ticket = Number.isInteger(id) ? getTicketById(id) : null;
-    if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
-    if (!emailAvailable()) return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
-    const result = await emailTicket(ticket);
-    const updated = serializeTicket(getTicketById(id));
-    sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
-    if (result.status === 'failed') return res.status(502).json({ error: `Email could not be sent: ${result.error}`, ticket: updated });
-    res.json({ message: `Ticket emailed to ${ticket.email}.`, ticket: updated });
-  } catch (error) { next(error); }
-});
+    const rawNames = Array.isArray(req.body.names)
+      ? req.body.names
+      : String(req.body.names || '').split(/\r?\n/);
 
-app.post('/api/admin/tickets/email-all', requireAdmin, async (req, res, next) => {
-  try {
-    if (!emailAvailable()) {
-      return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
-    }
-    const mode = req.body && req.body.mode === 'all' ? 'all' : 'pending';
-    const tickets = mode === 'all'
-      ? db.prepare('SELECT * FROM tickets ORDER BY id ASC').all()
-      : db.prepare("SELECT * FROM tickets WHERE email_status IS NULL OR email_status != 'sent' ORDER BY id ASC").all();
+    const names = rawNames
+      .map((n) => cleanText(n, 100))
+      .filter((n) => n.length >= 2);
 
-    if (tickets.length === 0) {
-      return res.json({
-        total: 0,
-        sent: 0,
-        failed: 0,
-        errors: [],
-        message: mode === 'all' ? 'No tickets found in the system.' : 'All students have already received their tickets!'
-      });
+    if (names.length === 0) {
+      return res.status(400).json({ error: 'Please provide at least one valid participant name.' });
     }
 
-    let sent = 0;
-    let failed = 0;
-    const errors = [];
+    const issued = new Date();
+    const validUntil = new Date(issued.getTime() + TICKET_VALID_DAYS * 24 * 60 * 60 * 1000);
+    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until) VALUES (?, '', '', ?, ?, ?)`);
 
-    for (const t of tickets) {
-      try {
-        const result = await emailTicket(t);
-        const updated = serializeTicket(getTicketById(t.id));
-        sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
-        if (result.status === 'sent') {
-          sent++;
-        } else {
-          failed++;
-          errors.push({ id: t.id, name: t.full_name, email: t.email, error: result.error });
-        }
-      } catch (err) {
-        failed++;
-        errors.push({ id: t.id, name: t.full_name, email: t.email, error: err.message });
+    const createdTickets = [];
+    db.transaction(() => {
+      for (const name of names) {
+        const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
+        const r = insertStmt.run(name, ticketCode, issued.toISOString(), validUntil.toISOString());
+        createdTickets.push(getTicketById(Number(r.lastInsertRowid)));
       }
-      if (tickets.length > 1) {
-        await new Promise((r) => setTimeout(r, 150));
-      }
+    })();
+
+    for (const t of createdTickets) {
+      sheetsAppendTicket(serializeTicket(t)).catch(() => {});
     }
 
-    res.json({
-      total: tickets.length,
-      sent,
-      failed,
-      errors,
-      message: `Completed: ${sent} ticket${sent === 1 ? '' : 's'} sent successfully${failed > 0 ? `, ${failed} failed` : ''}.`
+    res.status(201).json({
+      message: `Successfully issued ${createdTickets.length} ticket${createdTickets.length === 1 ? '' : 's'}.`,
+      count: createdTickets.length,
+      tickets: createdTickets.map(serializeTicket)
     });
   } catch (error) { next(error); }
+});
+
+app.post('/api/admin/tickets/:id/send', requireAdmin, (req, res) => {
+  res.json({ message: 'Email system is disabled. Tickets are issued by name from the portal.' });
+});
+
+app.post('/api/admin/tickets/email-all', requireAdmin, (req, res) => {
+  res.json({ message: 'Email system is disabled. Tickets are issued by name from the portal.', total: 0, sent: 0, failed: 0 });
 });
 
 app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
@@ -415,6 +398,7 @@ app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid ticket.' });
   const existing = getTicketById(id);
   if (!existing) return res.status(404).json({ error: 'Ticket not found.' });
+  cancelledCodes.add(existing.ticket_code);
   const result = db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   if (!result.changes) return res.status(404).json({ error: 'Ticket not found.' });
   sheetsCancelTicket(existing.ticket_code).catch((err) => console.error('Sheet cancel error:', err.message));
@@ -426,6 +410,9 @@ async function handleCheckinRequest(req, res, next) {
     const code = extractTicketCode(req.body.ticketCode);
     const match = code.match(/^[A-F0-9]{16}$/);
     if (!match) return res.status(400).json({ error: 'Enter a valid ticket code or scan a CAIPSD ticket QR.' });
+    if (cancelledCodes.has(match[0])) {
+      return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
+    }
     let ticket = getTicketByCode(match[0]);
     if (!ticket) {
       try {
@@ -439,7 +426,7 @@ async function handleCheckinRequest(req, res, next) {
           const validUntil = isoOr(found.valid_until, new Date(Date.now() + TICKET_VALID_DAYS * 86400000).toISOString());
           db.prepare(`INSERT OR IGNORE INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
             found.full_name || 'Participant',
-            found.email || `attendee-${match[0].toLowerCase()}@caipsd.org`,
+            found.email || '',
             found.phone || '',
             match[0],
             issued,
@@ -458,6 +445,29 @@ async function handleCheckinRequest(req, res, next) {
     if (new Date(ticket.valid_until).getTime() <= now.getTime()) {
       return res.status(410).json({ error: 'This ticket has expired.', ticket: serializeTicket(ticket) });
     }
+
+    // 1. Maximum 2 days / 2 total entries allowed
+    if (ticket.entry_count >= 2) {
+      return res.status(409).json({
+        error: 'Ticket limit reached: Yeh ticket pehle hi 2 din (Day 1 & Day 2) use ho chuka hai.',
+        limitReached: true,
+        ticket: serializeTicket(ticket)
+      });
+    }
+
+    // 2. 1 scan per calendar day
+    const todayLocal = getLocalDateString(now);
+    const pastEntries = db.prepare('SELECT scanned_at FROM entries WHERE ticket_id = ? ORDER BY id ASC').all(ticket.id);
+    const alreadyScannedToday = pastEntries.some((entry) => getLocalDateString(new Date(entry.scanned_at)) === todayLocal);
+
+    if (alreadyScannedToday) {
+      return res.status(409).json({
+        error: 'Yeh ticket aaj pehle hi use ho chuka hai! 1 din mein sirf 1 baar entry allowed hai (Already used today).',
+        alreadyScannedToday: true,
+        ticket: serializeTicket(ticket)
+      });
+    }
+
     const scannedAt = now.toISOString();
     db.transaction(() => {
       db.prepare('INSERT INTO entries (ticket_id, scanned_at) VALUES (?, ?)').run(ticket.id, scannedAt);
@@ -465,8 +475,18 @@ async function handleCheckinRequest(req, res, next) {
     })();
     const updated = serializeTicket(getTicketById(ticket.id));
     sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
-    const repeat = updated.entry_count > 1;
-    res.json({ message: repeat ? `Entry allowed (visit ${updated.entry_count}).` : 'Entry allowed. Welcome!', repeat, ticket: updated });
+
+    const dayNumber = updated.entry_count;
+    const message = dayNumber === 1
+      ? 'Entry allowed! Welcome (Day 1 check-in successful).'
+      : 'Entry allowed! Welcome back (Day 2 check-in successful).';
+
+    res.json({
+      message,
+      dayNumber,
+      repeat: dayNumber > 1,
+      ticket: updated
+    });
   } catch (error) { next(error); }
 }
 

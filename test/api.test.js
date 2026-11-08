@@ -52,64 +52,71 @@ test('login rejects wrong password and accepts the right one', async () => {
 
 test('ticket validation', async () => {
   const post = (body) => call('/api/admin/tickets', { method: 'POST', body });
-  assert.equal((await post({ ...person, email: 'bad' })).status, 400);
-  assert.equal((await post({ ...person, phone: 'abc' })).status, 400);
-  assert.equal((await post({ ...person, fullName: '' })).status, 400);
+  assert.equal((await post({ fullName: '' })).status, 400);
+  assert.equal((await post({ fullName: 'A' })).status, 400);
 });
 
 let ticket; let ticketId;
-test('issues a ticket valid for 3 days, saves it and emails the QR', async () => {
-  const r = await call('/api/admin/tickets', { method: 'POST', body: person });
+test('issues a ticket by participant name', async () => {
+  const r = await call('/api/admin/tickets', { method: 'POST', body: { fullName: 'Ayesha Khan' } });
   assert.equal(r.status, 201);
   ticket = r.data.ticket; ticketId = ticket.id;
   assert.match(ticket.ticket_code, /^[A-F0-9]{16}$/);
-  assert.equal(ticket.email, 'ayesha@example.com');
-  const days = (new Date(ticket.valid_until) - new Date(ticket.issued_at)) / 86400000;
-  assert.equal(days, 3);
-  assert.equal(r.data.email.status, 'sent');
-  assert.equal(r.data.ticket.email_status, 'sent');
+  assert.equal(ticket.full_name, 'Ayesha Khan');
+  const days = Math.round((new Date(ticket.valid_until) - new Date(ticket.issued_at)) / 86400000);
+  assert.ok(days >= 2);
 });
 
-test('email message contains the ticket details and an embedded QR', async () => {
-  const msg = buildMessage(db.prepare('SELECT * FROM tickets WHERE id = ?').get(ticketId), Buffer.from('png'));
-  assert.equal(msg.to, 'ayesha@example.com');
-  assert.ok(msg.html.includes(ticket.ticket_code) && msg.html.includes('cid:ticket-qr'));
-  assert.equal(msg.attachments[0].cid, 'ticket-qr');
-});
-
-test('one ticket per email address', async () => {
-  const dup = await call('/api/admin/tickets', { method: 'POST', body: { ...person, email: 'AYESHA@example.com' } });
-  assert.equal(dup.status, 409);
-});
-
-test('tickets can be created without emailing, and resent later', async () => {
-  const r = await call('/api/admin/tickets', { method: 'POST', body: { fullName: 'Bilal Ahmed', email: 'bilal@example.com', phone: '0300-1112223', sendEmail: false } });
+test('bulk issue tickets by list of names', async () => {
+  const r = await call('/api/admin/tickets/bulk', { method: 'POST', body: { names: 'Bilal Ahmed\nFatima Noor\nUsman Ali' } });
   assert.equal(r.status, 201);
-  assert.equal(r.data.email.status, 'not_sent');
-  const send = await call(`/api/admin/tickets/${r.data.ticket.id}/send`, { method: 'POST' });
-  assert.equal(send.status, 200);
-  assert.equal(send.data.ticket.email_status, 'sent');
+  assert.equal(r.data.count, 3);
+  assert.equal(r.data.tickets.length, 3);
 });
 
-test('public ticket page data hides contact details', async () => {
+test('public ticket page loads without error', async () => {
   const r = await call(`/api/ticket/${ticket.ticket_code}`, { auth: false });
   assert.equal(r.status, 200);
   assert.match(r.data.ticket.qrDataUrl, /^data:image\/png/);
-  assert.equal(r.data.ticket.email, undefined);
-  assert.equal(r.data.ticket.phone, undefined);
+  assert.equal(r.data.ticket.full_name, 'Ayesha Khan');
   assert.equal((await call('/api/ticket/NOTAREALTICKET00', { auth: false })).status, 404);
 });
 
-test('entry can be scanned repeatedly while the ticket is valid', async () => {
+test('gate check-in allows 1 scan on Day 1 and blocks second scan on the same day', async () => {
   const first = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
   assert.equal(first.status, 200);
+  assert.equal(first.data.dayNumber, 1);
   assert.equal(first.data.repeat, false);
-  const second = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: `caipsd|ticket|${ticket.ticket_code.toLowerCase()}` } });
-  assert.equal(second.status, 200);
-  assert.equal(second.data.repeat, true);
-  assert.equal(second.data.ticket.entry_count, 2);
+
+  // Second scan today -> must be rejected (409)
+  const secondToday = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
+  assert.equal(secondToday.status, 409);
+  assert.ok(secondToday.data.alreadyScannedToday);
+
+  // Invalid formats and unknown codes
   assert.equal((await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: 'zzz' } })).status, 400);
   assert.equal((await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: '0000000000000000' } })).status, 404);
+});
+
+test('gate check-in allows 1 scan on Day 2, and blocks third scan', async () => {
+  // Simulate Day 1 entry occurred yesterday
+  db.prepare('UPDATE entries SET scanned_at = ? WHERE ticket_id = ?').run(new Date(Date.now() - 86400000).toISOString(), ticketId);
+
+  // Day 2 scan -> allowed (visit 2)
+  const day2Scan = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
+  assert.equal(day2Scan.status, 200);
+  assert.equal(day2Scan.data.dayNumber, 2);
+  assert.equal(day2Scan.data.repeat, true);
+
+  // Repeated scan on Day 2 -> rejected (409 already scanned today)
+  const day2Repeat = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
+  assert.equal(day2Repeat.status, 409);
+
+  // Third scan simulation (both days used, new day) -> rejected (409 limit reached)
+  db.prepare('UPDATE entries SET scanned_at = ? WHERE id = (SELECT id FROM entries WHERE ticket_id = ? ORDER BY id DESC LIMIT 1)').run(new Date(Date.now() - 40000000).toISOString(), ticketId);
+  const thirdScan = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
+  assert.equal(thirdScan.status, 409);
+  assert.ok(thirdScan.data.limitReached);
 });
 
 test('expired tickets are rejected', async () => {
@@ -124,7 +131,7 @@ test('expired tickets are rejected', async () => {
 
 test('summary counts and search', async () => {
   const s = await call('/api/admin/summary');
-  assert.deepEqual({ total: s.data.total, expired: s.data.expired, awaiting: s.data.awaiting }, { total: 2, expired: 1, awaiting: 1 });
+  assert.deepEqual({ total: s.data.total, expired: s.data.expired, awaiting: s.data.awaiting }, { total: 4, expired: 1, awaiting: 3 });
   assert.equal((await call('/api/admin/tickets?q=bilal')).data.tickets.length, 1);
   assert.equal((await call('/api/admin/tickets?q=%25')).data.tickets.length, 0);
 });

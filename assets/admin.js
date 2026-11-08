@@ -18,13 +18,9 @@ function dateTimeLabel(value) {
 function pill(kind, label) { return `<span class="status-pill status-${kind}">${escapeHtml(label)}</span>`; }
 function ticketPill(ticket) {
   if (ticket.status === 'expired') return pill('closed', 'Expired');
-  if (ticket.status === 'checked_in') return pill('checked_in', `Entered · ${ticket.entry_count}×`);
-  return pill('open', 'Valid');
-}
-function emailPill(ticket) {
-  if (ticket.email_status === 'sent') return pill('open', 'Sent');
-  if (ticket.email_status === 'failed') return `<span title="${escapeHtml(ticket.email_error || '')}">${pill('closed', 'Failed')}</span>`;
-  return pill('draft', 'Not sent');
+  if (ticket.entry_count >= 2) return pill('open', 'Day 1 & Day 2 (2/2)');
+  if (ticket.entry_count === 1) return pill('checked_in', 'Day 1 Entered (1/2)');
+  return pill('draft', 'Not Entered (0/2)');
 }
 function toast(message, type = 'success') {
   const node = document.createElement('div');
@@ -845,9 +841,11 @@ async function loadDashboard() {
   } catch (error) { console.error('Dashboard load failed:', error); }
 }
 function renderStats(s) {
-  $('#stat-total').textContent = s.total; $('#stat-entered').textContent = s.entered;
-  $('#stat-awaiting').textContent = s.awaiting; $('#stat-emailed').textContent = s.emailed;
-  $('#stat-expired-note').textContent = s.expired ? `${s.expired} ticket${s.expired === 1 ? '' : 's'} expired` : 'Tickets sent by email';
+  if ($('#stat-total')) $('#stat-total').textContent = s.total ?? '0';
+  if ($('#stat-day1')) $('#stat-day1').textContent = s.day1Entered ?? '0';
+  if ($('#stat-day2')) $('#stat-day2').textContent = s.day2Entered ?? '0';
+  if ($('#stat-awaiting')) $('#stat-awaiting').textContent = s.awaiting ?? '0';
+  if ($('#stat-expired-note')) $('#stat-expired-note').textContent = s.expired ? `${s.expired} ticket${s.expired === 1 ? '' : 's'} expired` : 'Awaiting check-in';
 }
 async function refreshStats() {
   try { renderStats(await api('/api/admin/summary')); } catch (error) { console.error(error); }
@@ -855,12 +853,13 @@ async function refreshStats() {
 
 function participantCell(row) {
   const initials = row.full_name.trim().split(/\s+/).slice(0, 2).map((word) => word[0] || '').join('').toUpperCase();
-  return `<div class="participant-cell"><span class="participant-avatar">${escapeHtml(initials)}</span><span><strong>${escapeHtml(row.full_name)}</strong><small>${escapeHtml(row.email)}</small></span></div>`;
+  const sub = row.email ? escapeHtml(row.email) : (row.phone ? escapeHtml(row.phone) : 'Direct Ticket');
+  return `<div class="participant-cell"><span class="participant-avatar">${escapeHtml(initials)}</span><span><strong>${escapeHtml(row.full_name)}</strong><small>${sub}</small></span></div>`;
 }
 function ticketsTable(rows, withActions) {
-  if (!rows.length) return '<div class="empty-table">No tickets found. Use “Issue ticket” to create the first one.</div>';
-  const head = `<tr><th>PARTICIPANT</th><th>PHONE</th><th>TICKET ID</th><th>VALID UNTIL</th><th>STATUS</th><th>EMAIL</th>${withActions ? '<th></th>' : ''}</tr>`;
-  const body = rows.map((row) => `<tr><td>${participantCell(row)}</td><td>${escapeHtml(row.phone)}</td><td><strong>${escapeHtml(row.ticket_code)}</strong></td><td>${escapeHtml(dateTimeLabel(row.valid_until))}</td><td>${ticketPill(row)}</td><td>${emailPill(row)}</td>${withActions ? `<td><div class="row-actions"><a class="status-action" href="ticket.html?code=${encodeURIComponent(row.ticket_code)}" target="_blank" rel="noopener">View</a><button class="status-action send-ticket" data-id="${row.id}" data-email="${escapeHtml(row.email)}">${row.email_status === 'sent' ? 'Resend' : 'Send email'}</button><button class="status-action danger cancel-ticket" data-id="${row.id}" data-name="${escapeHtml(row.full_name)}">Cancel</button></div></td>` : ''}</tr>`).join('');
+  if (!rows.length) return '<div class="empty-table">No tickets found. Use “Issue ticket” or “Bulk issue” to create tickets.</div>';
+  const head = `<tr><th>PARTICIPANT</th><th>PHONE / INFO</th><th>TICKET ID</th><th>VALID UNTIL</th><th>ATTENDANCE</th>${withActions ? '<th>ACTION</th>' : ''}</tr>`;
+  const body = rows.map((row) => `<tr><td>${participantCell(row)}</td><td>${escapeHtml(row.phone || '—')}</td><td><strong>${escapeHtml(row.ticket_code)}</strong></td><td>${escapeHtml(dateTimeLabel(row.valid_until))}</td><td>${ticketPill(row)}</td>${withActions ? `<td><div class="row-actions"><a class="status-action" href="ticket.html?code=${encodeURIComponent(row.ticket_code)}" target="_blank" rel="noopener">View / Print</a><button class="status-action danger cancel-ticket" data-id="${row.id}" data-name="${escapeHtml(row.full_name)}">Cancel</button></div></td>` : ''}</tr>`).join('');
   return `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
@@ -876,14 +875,6 @@ async function loadTickets() {
   try {
     const data = await api(`/api/admin/tickets?${params.toString()}`);
     $('#tickets-table').innerHTML = ticketsTable(data.tickets, true);
-    $$('.send-ticket').forEach((button) => button.addEventListener('click', async () => {
-      button.disabled = true; button.textContent = 'Sending…';
-      try {
-        const result = await api(`/api/admin/tickets/${button.dataset.id}/send`, { method: 'POST' });
-        toast(result.message);
-      } catch (error) { toast(error.message, 'error'); }
-      await loadTickets(); refreshStats();
-    }));
     $$('.cancel-ticket').forEach((button) => button.addEventListener('click', async () => {
       if (!confirm(`Cancel the ticket for ${button.dataset.name}? Its QR code will stop working.`)) return;
       button.disabled = true;
@@ -932,7 +923,6 @@ const ticketModal = $('#ticket-modal');
 function openTicketModal() {
   lastFocused = document.activeElement;
   const form = $('#ticket-form'); form.reset();
-  $('#send-email-checkbox').checked = appConfig.mail.configured;
   $('#ticket-form-error').textContent = '';
   ticketModal.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -942,9 +932,31 @@ function closeTicketModal() {
   ticketModal.hidden = true; document.body.style.overflow = '';
   if (lastFocused && lastFocused.focus) lastFocused.focus();
 }
-$('#close-ticket-modal').addEventListener('click', closeTicketModal);
-$('#cancel-ticket').addEventListener('click', closeTicketModal);
-ticketModal.addEventListener('click', (event) => { if (event.target === ticketModal) closeTicketModal(); });
+$('#close-ticket-modal')?.addEventListener('click', closeTicketModal);
+$('#cancel-ticket')?.addEventListener('click', closeTicketModal);
+ticketModal?.addEventListener('click', (event) => { if (event.target === ticketModal) closeTicketModal(); });
+
+/* ---- Bulk ticket modal ---- */
+const bulkModal = $('#bulk-modal');
+function openBulkModal() {
+  lastFocused = document.activeElement;
+  if ($('#bulk-names-input')) $('#bulk-names-input').value = '';
+  if ($('#bulk-form-error')) $('#bulk-form-error').textContent = '';
+  if (bulkModal) bulkModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => $('#bulk-names-input')?.focus(), 50);
+}
+function closeBulkModal() {
+  if (bulkModal) bulkModal.hidden = true;
+  document.body.style.overflow = '';
+  if (lastFocused && lastFocused.focus) lastFocused.focus();
+}
+$('#close-bulk-modal')?.addEventListener('click', closeBulkModal);
+$('#cancel-bulk-modal')?.addEventListener('click', closeBulkModal);
+bulkModal?.addEventListener('click', (event) => { if (event.target === bulkModal) closeBulkModal(); });
+$('#quick-bulk-tickets')?.addEventListener('click', openBulkModal);
+$('#btn-bulk-tickets')?.addEventListener('click', openBulkModal);
+$('#overview-bulk-btn')?.addEventListener('click', openBulkModal);
 
 /* ---- Google Mail Modal ---- */
 const mailModal = $('#mail-modal');
@@ -1216,24 +1228,50 @@ document.addEventListener('keydown', (event) => {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 });
-$('#ticket-form').addEventListener('submit', async (event) => {
+$('#ticket-form')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const payload = { fullName: form.elements.fullName.value, email: form.elements.email.value, phone: form.elements.phone.value, sendEmail: form.elements.sendEmail.checked };
+  const payload = {
+    fullName: form.elements.fullName.value,
+    phone: form.elements.phone ? form.elements.phone.value : '',
+    email: form.elements.email ? form.elements.email.value : ''
+  };
   const button = $('#save-ticket');
   button.disabled = true;
-  button.textContent = payload.sendEmail ? 'Generating & Emailing…' : 'Generating…';
+  button.textContent = 'Generating…';
   $('#ticket-form-error').textContent = '';
   try {
     const data = await api('/api/admin/tickets', { method: 'POST', body: JSON.stringify(payload) });
     closeTicketModal();
-    if (data.email && data.email.status === 'sent') toast(`✓ Ticket created and emailed to ${data.ticket.email}.`);
-    else if (data.email && data.email.status === 'failed') toast(`Ticket saved, but the email could NOT be sent: ${data.email.error}. Use “Send email” on the ticket to retry.`, 'error');
-    else toast('Ticket created and saved. Use “Send email” when you are ready to deliver it.');
+    toast(`✓ Ticket generated for ${data.ticket.full_name}. (ID: ${data.ticket.ticket_code})`);
     refreshStats();
-    if ($('#view-tickets').classList.contains('active')) loadTickets(); else if ($('#view-overview').classList.contains('active')) loadDashboard();
+    if ($('#view-tickets').classList.contains('active')) loadTickets();
+    else if ($('#view-overview').classList.contains('active')) loadDashboard();
   } catch (error) { $('#ticket-form-error').textContent = error.message; }
   finally { button.disabled = false; button.innerHTML = 'Generate ticket <span>→</span>'; }
+});
+
+$('#bulk-form')?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const text = $('#bulk-names-input').value.trim();
+  if (!text) return;
+  const button = $('#save-bulk-btn');
+  button.disabled = true;
+  button.textContent = 'Generating tickets…';
+  $('#bulk-form-error').textContent = '';
+  try {
+    const data = await api('/api/admin/tickets/bulk', { method: 'POST', body: JSON.stringify({ names: text }) });
+    closeBulkModal();
+    toast(`✓ ${data.message}`);
+    refreshStats();
+    if ($('#view-tickets').classList.contains('active')) loadTickets();
+    else if ($('#view-overview').classList.contains('active')) loadDashboard();
+  } catch (error) {
+    $('#bulk-form-error').textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.innerHTML = 'Generate All Tickets <span>→</span>';
+  }
 });
 
 /* ---- Entry check-in ---- */
@@ -1255,7 +1293,8 @@ async function performCheckin(ticketCode) {
   note.className = 'scanner-message';
   try {
     const result = await api('/api/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
-    showCheckinResult(result.repeat ? 'warning' : 'success', result.message, result.ticket, result.repeat ? `Previous entry: ${dateTimeLabel(result.ticket.first_entry_at)}` : '');
+    const visitInfo = result.dayNumber === 2 ? 'Day 2 Entry · Final Day Recorded' : 'Day 1 Entry Recorded';
+    showCheckinResult(result.repeat ? 'warning' : 'success', result.message, result.ticket, visitInfo);
     note.textContent = result.message; note.className = 'scanner-message success';
     $('#ticket-code-input').value = '';
     refreshStats();

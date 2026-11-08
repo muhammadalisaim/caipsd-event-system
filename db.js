@@ -35,15 +35,15 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS tickets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    phone TEXT NOT NULL,
+    email TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
     ticket_code TEXT NOT NULL UNIQUE,
     issued_at TEXT NOT NULL,
     valid_until TEXT NOT NULL,
     entry_count INTEGER NOT NULL DEFAULT 0,
     first_entry_at TEXT,
     last_entry_at TEXT,
-    email_status TEXT NOT NULL DEFAULT 'not_sent' CHECK(email_status IN ('not_sent','sent','failed')),
+    email_status TEXT NOT NULL DEFAULT 'not_sent',
     emailed_at TEXT,
     email_error TEXT
   );
@@ -71,6 +71,40 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_entries_ticket ON entries(ticket_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
 `);
+
+// Migration: remove unique constraint on email if present in existing table
+try {
+  const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tickets'").get();
+  if (tableSql && tableSql.sql && (tableSql.sql.includes('email TEXT NOT NULL UNIQUE') || tableSql.sql.includes('email TEXT UNIQUE'))) {
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE tickets_migrated (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name TEXT NOT NULL,
+        email TEXT DEFAULT '',
+        phone TEXT DEFAULT '',
+        ticket_code TEXT NOT NULL UNIQUE,
+        issued_at TEXT NOT NULL,
+        valid_until TEXT NOT NULL,
+        entry_count INTEGER NOT NULL DEFAULT 0,
+        first_entry_at TEXT,
+        last_entry_at TEXT,
+        email_status TEXT NOT NULL DEFAULT 'not_sent',
+        emailed_at TEXT,
+        email_error TEXT
+      );
+      INSERT INTO tickets_migrated (id, full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status, emailed_at, email_error)
+        SELECT id, full_name, COALESCE(email, ''), COALESCE(phone, ''), ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, COALESCE(email_status, 'not_sent'), emailed_at, email_error FROM tickets;
+      DROP TABLE tickets;
+      ALTER TABLE tickets_migrated RENAME TO tickets;
+      CREATE INDEX IF NOT EXISTS idx_tickets_code ON tickets(ticket_code);
+      CREATE INDEX IF NOT EXISTS idx_tickets_valid ON tickets(valid_until);
+      PRAGMA foreign_keys = ON;
+    `);
+  }
+} catch (e) {
+  console.warn('Migration check:', e.message);
+}
 
 function initializeAdmin(email, password) {
   const normalizedEmail = String(email || '').trim().toLowerCase();

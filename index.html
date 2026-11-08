@@ -106,7 +106,7 @@
               </form>
               <div class="manual-tip">
                 <span>✳</span>
-                <p>A ticket is valid for <b id="valid-days">3</b> days from the moment it is issued. Within that time it can be scanned for entry as many times as needed. Expired or cancelled tickets are rejected.</p>
+                <p>A ticket is valid for 2 days. It allows <b>1 entry on Day 1</b> and <b>1 entry on Day 2</b> (Max 1 scan per calendar day). Expired or repeated scans on the same day are rejected.</p>
               </div>
               <div id="checkin-result" class="checkin-result empty-result">
                 <div class="result-icon">✓</div>
@@ -176,7 +176,6 @@
         <div class="topbar-right">
           <button id="topbar-gate-btn" class="topbar-status topbar-btn" style="cursor: pointer; border: 1px solid rgba(43,95,220,0.15); background: #ffffff; color: inherit; padding: 0.3rem 0.75rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem; font-family: inherit;" title="Switch to Entrance Gate Check-in"><i style="background: #22c55e;"></i> <span>Gate Check-in</span></button>
           <a href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener" class="topbar-status" style="text-decoration: none; color: inherit; background: rgba(43,95,220,0.08); padding: 0.3rem 0.7rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem;" title="Open permanent Google Sheet"><i style="background: #22c55e;"></i> Google Sheet Live ↗</a>
-          <button id="topbar-email-btn" class="topbar-status topbar-btn" style="cursor: pointer; border: 1px solid rgba(43,95,220,0.15); background: #ffffff; color: inherit; padding: 0.3rem 0.75rem; border-radius: 999px; display: inline-flex; align-items: center; gap: 0.45rem; font-weight: 600; font-size: 0.78rem; font-family: inherit;" title="Connect or configure Google / Gmail Account"><i id="topbar-mail-dot" style="background: #f59d14;"></i> <span id="topbar-mail-text">Google Mail</span></button>
           <span class="topbar-status"><i></i> System active</span>
           <div class="admin-avatar" id="admin-avatar"><img src="assets/caipsd-mark.png" alt="Admin" class="avatar-img" /></div>
           <div class="admin-user"><strong>Administrator</strong><small id="admin-email">admin@caipsd.org</small></div>
@@ -184,21 +183,47 @@
       </header>
       <div class="admin-content">
         <section class="view-section active" id="view-overview">
-          <div class="page-heading"><div><div class="admin-kicker">YOUR EVENT AT A GLANCE</div><h1>Good to see you.</h1><p>Issue tickets, track who has entered and keep the event running smoothly.</p></div><button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue ticket</button></div>
+          <div class="page-heading"><div><div class="admin-kicker">YOUR EVENT AT A GLANCE</div><h1>Good to see you.</h1><p>Issue tickets, track gate check-ins and keep the event running smoothly.</p></div><div style="display:flex; gap:8px;"><button class="admin-button admin-button-secondary" id="overview-bulk-btn">＋ Bulk issue</button><button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue ticket</button></div></div>
           <div class="stats-grid">
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-blue">▤</span><span class="stat-caption">TICKETS ISSUED</span></div><strong id="stat-total">—</strong><small>Saved in this system</small></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-purple">✓</span><span class="stat-caption">ENTERED</span></div><strong id="stat-entered">—</strong><small>Scanned at the entrance</small></article>
-            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-orange">◷</span><span class="stat-caption">NOT YET ENTERED</span></div><strong id="stat-awaiting">—</strong><small>Valid tickets</small></article>
-            <article class="stat-card" id="stat-card-emailed" style="cursor: pointer;" title="Click to email all students"><div class="stat-top"><span class="stat-icon stat-icon-green">✉</span><span class="stat-caption">EMAILED</span></div><strong id="stat-emailed">—</strong><small id="stat-expired-note">Tickets sent by email</small></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-blue">▤</span><span class="stat-caption">TICKETS ISSUED</span></div><strong id="stat-total">—</strong><small>Total registered participants</small></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-purple">✓</span><span class="stat-caption">DAY 1 ENTERED</span></div><strong id="stat-day1">—</strong><small>Day 1 check-in scans</small></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-green">✓✓</span><span class="stat-caption">DAY 2 ENTERED</span></div><strong id="stat-day2">—</strong><small>Day 2 check-in scans</small></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-icon stat-icon-orange">◷</span><span class="stat-caption">NOT YET ENTERED</span></div><strong id="stat-awaiting">—</strong><small id="stat-expired-note">Awaiting check-in</small></article>
           </div>
-          <div class="dashboard-grid"><section class="panel quick-panel"><div class="panel-heading"><div><h2>Quick actions</h2><p>Common event tasks</p></div></div><button class="quick-action" data-action="new-ticket"><span class="quick-icon">＋</span><span><strong>Issue a ticket</strong><small>Name, phone and email — ticket is ready instantly</small></span><b>→</b></button><button class="quick-action" id="quick-email-all"><span class="quick-icon quick-icon-green">✉</span><span><strong>Email all students (1-Click)</strong><small>Send QR passes to participants instantly</small></span><b>→</b></button><button class="quick-action" id="quick-open-gate"><span class="quick-icon quick-icon-green">⌗</span><span><strong>Gate Check-in (Front Page)</strong><small>Switch to entrance QR scanner</small></span><b>→</b></button><button class="quick-action" id="quick-connect-mail"><span class="quick-icon quick-icon-orange">⚙</span><span><strong>Connect Google Account</strong><small id="quick-mail-sub">Configure Gmail for automated delivery</small></span><b>→</b></button><a class="quick-action" href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener"><span class="quick-icon quick-icon-blue">📊</span><span><strong>Google Sheet Database ↗</strong><small>Live auto-sync attached</small></span><b>↗</b></a><button class="quick-action" id="quick-export"><span class="quick-icon quick-icon-purple">⇩</span><span><strong>Export ticket list</strong><small>Download a CSV report</small></span><b>→</b></button></section>
-            <section class="panel workshop-overview-panel"><div class="panel-heading"><div><h2>Email delivery</h2><p>Tickets are emailed from your own mailbox</p></div><button class="admin-button admin-button-secondary" id="manage-mail-btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;">⚙ Google Account</button></div><div id="mail-status" class="mail-status"><div class="table-loading">Checking email settings…</div></div></section>
+          <div class="dashboard-grid">
+            <section class="panel quick-panel">
+              <div class="panel-heading"><div><h2>Quick actions</h2><p>Common event tasks</p></div></div>
+              <button class="quick-action" data-action="new-ticket"><span class="quick-icon">＋</span><span><strong>Issue single ticket</strong><small>Generate instant QR ticket by participant name</small></span><b>→</b></button>
+              <button class="quick-action" id="quick-bulk-tickets"><span class="quick-icon quick-icon-blue">＋＋</span><span><strong>Bulk issue tickets (Names list)</strong><small>Paste student names and generate all tickets at once</small></span><b>→</b></button>
+              <button class="quick-action" id="quick-open-gate"><span class="quick-icon quick-icon-green">⌗</span><span><strong>Gate Check-in (Front Entrance)</strong><small>Switch to entrance QR scanner</small></span><b>→</b></button>
+              <a class="quick-action" href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener"><span class="quick-icon quick-icon-blue">📊</span><span><strong>Google Sheet Database ↗</strong><small>Live auto-sync attached</small></span><b>↗</b></a>
+              <button class="quick-action" id="quick-export"><span class="quick-icon quick-icon-purple">⇩</span><span><strong>Export ticket list</strong><small>Download a CSV report</small></span><b>→</b></button>
+            </section>
+            <section class="panel workshop-overview-panel">
+              <div class="panel-heading"><div><h2>Gate check-in policy</h2><p>Daily entrance rules</p></div></div>
+              <div class="mail-status" style="padding: 1rem 1.25rem;">
+                <div style="display:flex; flex-direction:column; gap:14px; font-size:0.86rem; line-height:1.55; color:#334155;">
+                  <div style="display:flex; align-items:flex-start; gap:10px;">
+                    <span style="background:rgba(43,95,220,0.12); color:#2b5fdc; font-weight:700; padding:2px 8px; border-radius:6px; font-size:0.75rem;">DAY 1</span>
+                    <div><strong>1 Scan allowed on Day 1.</strong> Repeat scans on the same calendar day are automatically blocked at the entrance.</div>
+                  </div>
+                  <div style="display:flex; align-items:flex-start; gap:10px;">
+                    <span style="background:rgba(34,197,94,0.12); color:#16a34a; font-weight:700; padding:2px 8px; border-radius:6px; font-size:0.75rem;">DAY 2</span>
+                    <div><strong>1 Scan allowed on Day 2.</strong> Repeat scans on Day 2 are blocked.</div>
+                  </div>
+                  <div style="display:flex; align-items:flex-start; gap:10px;">
+                    <span style="background:rgba(239,68,68,0.12); color:#dc2626; font-weight:700; padding:2px 8px; border-radius:6px; font-size:0.75rem;">LIMIT</span>
+                    <div><strong>Total 2 entries maximum.</strong> Each ticket pass covers both event days.</div>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
           <section class="panel recent-panel"><div class="panel-heading"><div><h2>Recent tickets</h2><p>Latest tickets issued</p></div><button class="subtle-link" data-view-link="tickets">View all →</button></div><div id="recent-tickets" class="table-wrap"><div class="table-loading">Loading tickets…</div></div></section>
         </section>
 
         <section class="view-section" id="view-tickets">
-          <div class="page-heading"><div><div class="admin-kicker">TICKET DESK</div><h1>Tickets.</h1><p>Every ticket you issue is saved here and tied to one participant.</p></div><div class="heading-actions"><button class="admin-button admin-button-green" id="btn-email-all">✉ Email all students (1-Click)</button><button class="admin-button admin-button-secondary" id="export-csv">↓ Export CSV</button><button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue ticket</button></div></div>
+          <div class="page-heading"><div><div class="admin-kicker">TICKET DESK</div><h1>Tickets.</h1><p>Every ticket you issue is saved here and tied to one participant.</p></div><div class="heading-actions"><button class="admin-button admin-button-secondary" id="export-csv">↓ Export CSV</button><button class="admin-button admin-button-primary" id="btn-bulk-tickets" style="background:#0284c7; border-color:#0284c7;">＋ Bulk issue (Names)</button><button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue ticket</button></div></div>
           <section class="panel full-panel"><div class="filter-bar"><div class="search-box"><span>⌕</span><input id="search-tickets" type="search" placeholder="Search name, email, phone or ticket ID…"></div><select id="filter-status"><option value="">All tickets</option><option value="valid">Valid — not entered</option><option value="checked_in">Entered</option><option value="expired">Expired</option></select></div><div id="tickets-table" class="table-wrap"><div class="table-loading">Loading tickets…</div></div><div class="table-footnote">Showing up to 500 most recent tickets.</div></section>
         </section>
       </div>
@@ -208,112 +233,48 @@
 
   <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>
   <div id="ticket-modal" class="admin-modal-backdrop" hidden>
-    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-modal-title"><button class="admin-modal-close" id="close-ticket-modal" aria-label="Close">×</button><div class="admin-kicker">NEW TICKET</div><h2 id="ticket-modal-title">Issue a <em>ticket.</em></h2><p class="modal-subcopy">Enter the participant’s details. The ticket is generated, saved and can be emailed right away.</p>
-      <form id="ticket-form" class="admin-form workshop-form"><label>Full name<input name="fullName" maxlength="100" required autocomplete="off" placeholder="Participant’s full name"></label><div class="admin-form-grid"><label>Email address<input name="email" type="email" maxlength="180" required autocomplete="off" placeholder="name@example.com"></label><label>Phone number<input name="phone" maxlength="30" required autocomplete="off" placeholder="+92 300 1234567"></label></div><label class="check-row"><input type="checkbox" name="sendEmail" id="send-email-checkbox" checked><span id="send-email-label">Email the ticket to the participant now</span></label><div id="ticket-form-error" class="inline-error" role="alert"></div><div class="modal-actions"><button type="button" class="admin-button admin-button-light" id="cancel-ticket">Cancel</button><button type="submit" class="admin-button admin-button-primary" id="save-ticket">Generate ticket <span>→</span></button></div></form>
-    </section>
-  </div>
+    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-modal-title">
+      <button class="admin-modal-close" id="close-ticket-modal" aria-label="Close">×</button>
+      <div class="admin-kicker">ISSUE TICKET</div>
+      <h2 id="ticket-modal-title">Issue a <em>ticket.</em></h2>
+      <p class="modal-subcopy">Generate a ticket with unique QR pass instantly by participant name.</p>
 
-  <div id="mail-modal" class="admin-modal-backdrop" hidden>
-    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="mail-modal-title" style="max-width: 580px;">
-      <button class="admin-modal-close" id="close-mail-modal" aria-label="Close">×</button>
-      <div class="admin-kicker">GOOGLE MAIL INTEGRATION</div>
-      <h2 id="mail-modal-title">Connect your <em>Google Account.</em></h2>
-      <p class="modal-subcopy">Connect your Gmail or Google Workspace account to send official event tickets with QR codes directly to students.</p>
-
-      <div class="google-guide-box">
-        <div class="guide-title"><span class="g-icon">G</span> How to get your Google App Password (in 1 minute):</div>
-        <ol class="guide-steps">
-          <li>Open <a href="https://myaccount.google.com/security" target="_blank" rel="noopener">myaccount.google.com/security ↗</a> and make sure <strong>2-Step Verification</strong> is ON.</li>
-          <li>Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords ↗</a>.</li>
-          <li>In "App name", type <strong>CAIPSD Event Portal</strong> and click <strong>Create</strong>.</li>
-          <li>Copy the <strong>16-letter password</strong> (e.g. <code>abcd efgh ijkl mnop</code>) and paste it below.</li>
-        </ol>
-      </div>
-
-      <div class="google-guide-box" style="margin-top: 1rem; border-color: #2b5fdc; background: #f0f6ff;">
-        <div class="guide-title" style="color: #1c304e; font-weight: 700;">
-          <span class="g-icon" style="background: #2b5fdc; color: #fff;">⚡</span> Activate Real Emails via Attached Google Sheet:
+      <form id="ticket-form" class="admin-form workshop-form">
+        <label>Participant Full Name *
+          <input name="fullName" maxlength="100" required autocomplete="off" placeholder="e.g. Muhammad Ali Saim">
+        </label>
+        <div class="admin-form-grid">
+          <label>Phone / Roll No (Optional)
+            <input name="phone" maxlength="30" autocomplete="off" placeholder="Optional phone or roll number">
+          </label>
+          <label>Email Address (Optional)
+            <input name="email" type="email" maxlength="180" autocomplete="off" placeholder="Optional email address">
+          </label>
         </div>
-        <p style="font-size: 0.82rem; color: #475569; margin: 0.35rem 0 0.75rem; line-height: 1.5;">
-          On GitHub Pages & live web, emails send directly from your Google Account via the attached Apps Script. Update your sheet once to enable 1-click student emails:
-        </p>
-        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-          <button type="button" class="admin-button admin-button-secondary" id="copy-apps-script-btn" style="font-size: 0.8rem; padding: 0.45rem 0.9rem;">📋 Copy Google Apps Script</button>
-          <a href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener" class="admin-button admin-button-light" style="font-size: 0.8rem; padding: 0.45rem 0.9rem; text-decoration: none;">Open Google Sheet ↗</a>
-        </div>
-      </div>
-
-      <form id="mail-form" class="admin-form">
-        <label>Gmail / Google Email Address
-          <input name="user" id="mail-user-input" type="email" maxlength="180" required autocomplete="off" placeholder="organizer@gmail.com">
-        </label>
-        <label>16-Character Google App Password
-          <input name="pass" id="mail-pass-input" type="password" maxlength="60" required autocomplete="off" placeholder="Paste 16-letter App Password here">
-        </label>
-        <label>Sender Display Name
-          <input name="fromName" id="mail-fromname-input" maxlength="100" placeholder="CAIPSD Events - The Islamia University of Bahawalpur">
-        </label>
-
-        <div id="mail-form-error" class="inline-error" role="alert"></div>
-        <div id="mail-form-success" class="inline-success" role="alert"></div>
-
-        <div class="modal-actions" style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-          <button type="button" class="admin-button admin-button-danger-outline" id="disconnect-mail-btn" style="display: none;">Disconnect</button>
-          <div style="display: flex; gap: 0.5rem; margin-left: auto;">
-            <button type="button" class="admin-button admin-button-light" id="cancel-mail-modal">Cancel</button>
-            <button type="button" class="admin-button admin-button-secondary" id="test-mail-btn" style="display: none;">Send Test Email</button>
-            <button type="submit" class="admin-button admin-button-primary" id="save-mail-btn">Connect & Save <span>→</span></button>
-          </div>
+        <div id="ticket-form-error" class="inline-error" role="alert"></div>
+        <div class="modal-actions">
+          <button type="button" class="admin-button admin-button-light" id="cancel-ticket">Cancel</button>
+          <button type="submit" class="admin-button admin-button-primary" id="save-ticket">Generate ticket <span>→</span></button>
         </div>
       </form>
     </section>
   </div>
 
-  <div id="email-all-modal" class="admin-modal-backdrop" hidden>
-    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="email-all-title" style="max-width: 520px;">
-      <button class="admin-modal-close" id="close-email-all-modal" aria-label="Close">×</button>
-      <div class="admin-kicker">1-CLICK BULK EMAIL</div>
-      <h2 id="email-all-title">Email all <em>students.</em></h2>
-      <p class="modal-subcopy">Send official CAIPSD admission tickets with QR code passes to participants in 1 click.</p>
+  <div id="bulk-modal" class="admin-modal-backdrop" hidden>
+    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="bulk-modal-title" style="max-width: 540px;">
+      <button class="admin-modal-close" id="close-bulk-modal" aria-label="Close">×</button>
+      <div class="admin-kicker">BULK TICKET GENERATOR</div>
+      <h2 id="bulk-modal-title">Issue tickets for <em>all students.</em></h2>
+      <p class="modal-subcopy">Paste participant names below (one name per line). Unique QR tickets will be generated instantly for all of them.</p>
 
-      <div id="email-all-summary-card" class="email-summary-box">
-        <div class="email-count-stat">
-          <span class="count-number" id="email-all-pending-count">0</span>
-          <span class="count-label">students waiting for ticket email</span>
-        </div>
-        <div class="email-meta-info">Total tickets issued: <strong id="email-all-total-count">0</strong> · Already emailed: <strong id="email-all-sent-count">0</strong></div>
-      </div>
-
-      <form id="email-all-form" class="admin-form">
-        <div class="radio-card-group">
-          <label class="radio-card active">
-            <input type="radio" name="emailMode" value="pending" checked>
-            <div class="radio-content">
-              <strong>Send to unemailed students only (Recommended)</strong>
-              <small>Only students who have not yet received their ticket pass will be emailed.</small>
-            </div>
-          </label>
-          <label class="radio-card">
-            <input type="radio" name="emailMode" value="all">
-            <div class="radio-content">
-              <strong>Resend to all students</strong>
-              <small>Sends / resends ticket QR passes to every registered student in the system.</small>
-            </div>
-          </label>
-        </div>
-
-        <div id="email-all-progress-wrap" class="progress-wrap" style="display: none;">
-          <div class="progress-bar-bg">
-            <div id="email-all-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
-          </div>
-          <div class="progress-label" id="email-all-progress-text">Sending tickets… please wait.</div>
-        </div>
-
-        <div id="email-all-error" class="inline-error" role="alert"></div>
-
+      <form id="bulk-form" class="admin-form">
+        <label>Student Names (One per line) *
+          <textarea id="bulk-names-input" rows="8" style="width: 100%; box-sizing: border-box; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px; font-family: inherit; font-size: 0.9rem; resize: vertical;" placeholder="Ali Ahmad&#10;Fatima Khan&#10;Usman Tariq&#10;Zainab Bibi" required></textarea>
+        </label>
+        <div id="bulk-form-error" class="inline-error" role="alert"></div>
         <div class="modal-actions">
-          <button type="button" class="admin-button admin-button-light" id="cancel-email-all-modal">Cancel</button>
-          <button type="submit" class="admin-button admin-button-green" id="confirm-email-all-btn">✉ Send Emails Now (1-Click)</button>
+          <button type="button" class="admin-button admin-button-light" id="cancel-bulk-modal">Cancel</button>
+          <button type="submit" class="admin-button admin-button-primary" id="save-bulk-btn">Generate All Tickets <span>→</span></button>
         </div>
       </form>
     </section>
