@@ -4,11 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
-  <meta name="theme-color" content="#1c304e" />
+  <meta name="theme-color" content="#ffffff" />
   <link rel="icon" href="assets/caipsd-mark.png" type="image/png">
   <title>CAIPSD Event Management Portal | The Islamia University of Bahawalpur</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/admin.css?v=2.2.0" />
 </head>
 <body class="admin-body">
@@ -18,7 +18,7 @@
       <div class="header-inner">
         <div class="header-brand">
           <a href="#portal-section" class="brand-link" data-scroll-tab="checkin">
-            <img src="assets/caipsd-logo-white.png" alt="CAIPSD Logo" class="header-logo-img" />
+            <img src="assets/caipsd-logo.png" alt="CAIPSD Logo" class="header-logo-img" />
             <div class="header-brand-info">
               <span class="univ-tag">The Islamia University of Bahawalpur</span>
               <span class="portal-tag">Event Operations &amp; Gate Pass</span>
@@ -221,7 +221,7 @@
           <div class="login-card-pro">
             <div class="login-card-brand-wrap">
               <div class="login-logo-glow-ring">
-                <img src="assets/caipsd-logo-white.png" alt="CAIPSD Logo" class="login-logo-img" />
+                <img src="assets/caipsd-logo.png" alt="CAIPSD Logo" class="login-logo-img" />
               </div>
               <div class="login-univ-subtext">The Islamia University of Bahawalpur</div>
               <span class="login-badge-pill">ORGANIZER ACCESS</span>
@@ -269,7 +269,7 @@
   <div id="admin-app" class="admin-app" hidden>
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-brand">
-        <img src="assets/caipsd-logo-white.png" alt="CAIPSD Logo" class="sidebar-logo-img" />
+        <img src="assets/caipsd-logo.png" alt="CAIPSD Logo" class="sidebar-logo-img" />
       </div>
       <div class="sidebar-section-label">WORKSPACE</div>
       <nav class="sidebar-nav">
@@ -416,15 +416,18 @@
       <button class="admin-modal-close" id="close-ticket-modal" aria-label="Close">×</button>
       <div class="admin-kicker">ISSUE TICKET</div>
       <h2 id="ticket-modal-title">Issue a <em>ticket.</em></h2>
-      <p class="modal-subcopy">Generate a ticket with unique QR pass instantly by participant name.</p>
+      <p class="modal-subcopy">Enter the participant's details. The QR ticket is saved and emailed to them automatically.</p>
 
       <form id="ticket-form" class="admin-form workshop-form">
         <label>Participant Full Name *
           <input name="fullName" maxlength="100" required autocomplete="off" placeholder="e.g. Muhammad Ali Saim">
         </label>
+        <label>Email address *
+          <input name="email" type="email" maxlength="180" required autocomplete="off" placeholder="participant@email.com">
+        </label>
         <div class="admin-form-grid">
           <label>Event Duration / Days
-            <select name="days" id="ticket-days-select" style="width: 100%; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 9px 10px; font-family: inherit; font-size: 0.9rem; background: #fff;">
+            <select name="days" id="ticket-days-select">
               <option value="1">1 Day Pass (1 Scan allowed)</option>
               <option value="2" selected>2 Days Pass (1 Scan/Day · 2 Scans max)</option>
               <option value="3">3 Days Pass (1 Scan/Day · 3 Scans max)</option>
@@ -434,14 +437,14 @@
               <option value="7">7 Days Pass (1 Scan/Day · 7 Scans max)</option>
             </select>
           </label>
-          <label>Phone / Roll No (Optional)
-            <input name="phone" maxlength="30" autocomplete="off" placeholder="Optional roll number or phone">
+          <label>Phone number
+            <input name="phone" maxlength="30" autocomplete="off" placeholder="03XX XXXXXXX">
           </label>
         </div>
         <div id="ticket-form-error" class="inline-error" role="alert"></div>
         <div class="modal-actions">
           <button type="button" class="admin-button admin-button-light" id="cancel-ticket">Cancel</button>
-          <button type="submit" class="admin-button admin-button-primary" id="save-ticket">Generate ticket <span>→</span></button>
+          <button type="submit" class="admin-button admin-button-primary" id="save-ticket">Generate &amp; email ticket <span>→</span></button>
         </div>
       </form>
     </section>
@@ -456,7 +459,7 @@
 
       <form id="bulk-form" class="admin-form">
         <label>Event Duration / Ticket Validity (Days)
-          <select id="bulk-days-select" name="days" style="width: 100%; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 9px 10px; font-family: inherit; font-size: 0.9rem; background: #fff; margin-bottom: 0.75rem;">
+          <select id="bulk-days-select" name="days">
             <option value="1">1 Day Pass (1 Scan allowed)</option>
             <option value="2" selected>2 Days Pass (1 Scan/Day · 2 Scans max)</option>
             <option value="3">3 Days Pass (1 Scan/Day · 3 Scans max)</option>
@@ -467,7 +470,7 @@
           </select>
         </label>
         <label>Student Names (One per line) *
-          <textarea id="bulk-names-input" rows="8" style="width: 100%; box-sizing: border-box; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px; font-family: inherit; font-size: 0.9rem; resize: vertical;" placeholder="Ali Ahmad&#10;Fatima Khan&#10;Usman Tariq&#10;Zainab Bibi" required></textarea>
+          <textarea id="bulk-names-input" rows="8" placeholder="Ali Ahmad&#10;Fatima Khan&#10;Usman Tariq&#10;Zainab Bibi" required></textarea>
         </label>
         <div id="bulk-form-error" class="inline-error" role="alert"></div>
         <div class="modal-actions">
@@ -487,7 +490,7 @@
 
       <form id="duration-form" class="admin-form">
         <label>Default Event Days
-          <select id="setting-duration-select" style="width: 100%; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: 0.95rem; font-weight: 600; background: #fff;">
+          <select id="setting-duration-select">
             <option value="1">1 Day (1 entry total)</option>
             <option value="2">2 Days (1 entry per day · 2 entries total)</option>
             <option value="3">3 Days (1 entry per day · 3 entries total)</option>

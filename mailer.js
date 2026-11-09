@@ -92,25 +92,25 @@ function buildMessage(ticket, qrPng) {
     'CAIPSD Events - The Islamia University of Bahawalpur'
   ].join('\n');
 
-  const html = `<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial,Helvetica,sans-serif;color:#18243a">
+  const html = `<!doctype html><html><body style="margin:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#14213D">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:28px 12px"><tr><td align="center">
-    <table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e8ee;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
-      <tr><td style="background:linear-gradient(135deg, #1c304e 0%, #162740 100%);color:#ffffff;padding:26px 28px;border-bottom:3px solid #f59d14">
-        <div style="font-size:11px;letter-spacing:2px;color:#f59d14;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>
-        <div style="font-size:22px;font-weight:800;margin-top:6px;letter-spacing:-0.5px">CAIPSD Event Ticket</div>
-        <div style="font-size:13px;color:#94a3b8;margin-top:2px">Official Admission & QR Pass</div>
+    <table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #E6E0D2">
+      <tr><td style="background:#ffffff;color:#14213D;padding:26px 28px;border-bottom:3px solid #B7791F">
+        <div style="font-size:11px;letter-spacing:2px;color:#8A5A12;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;margin-top:8px;letter-spacing:-0.5px;color:#14213D">CAIPSD Event Ticket</div>
+        <div style="font-size:13px;color:#5A6275;margin-top:2px">Official Admission & QR Pass</div>
       </td></tr>
       <tr><td style="padding:26px 28px">
         <p style="margin:0 0 14px;font-size:15px">Hello <strong>${esc(ticket.full_name)}</strong>,</p>
-        <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#4a566b">Your official event ticket is confirmed. Show the QR pass below at the entrance for camera verification. It stays valid until <strong>${esc(validUntil)}</strong>.</p>
-        <div style="text-align:center;padding:20px;border:2px dashed #2b5fdc;background:#f8fafc;border-radius:12px">
+        <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#3A445B">Your official event ticket is confirmed. Show the QR pass below at the entrance for camera verification. It stays valid until <strong>${esc(validUntil)}</strong>.</p>
+        <div style="text-align:center;padding:20px;border:2px dashed #D9CFB9;background:#FBF9F4;border-radius:14px">
           <img src="cid:ticket-qr" width="220" height="220" alt="Ticket QR code" style="display:block;margin:0 auto;border-radius:8px">
-          <div style="margin-top:14px;font-family:Consolas,monospace;font-size:17px;letter-spacing:3px;font-weight:800;color:#1c304e">${esc(ticket.ticket_code)}</div>
-          <div style="margin-top:4px;font-size:12px;color:#64748b;font-weight:600">Scan at entrance for fast check-in</div>
+          <div style="margin-top:14px;font-family:Consolas,monospace;font-size:17px;letter-spacing:3px;font-weight:800;color:#14213D">${esc(ticket.ticket_code)}</div>
+          <div style="margin-top:4px;font-size:12px;color:#5A6275;font-weight:600">Scan at entrance for fast check-in</div>
         </div>
-        ${link ? `<p style="text-align:center;margin:24px 0 0"><a href="${esc(link)}" style="background:#2b5fdc;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:13px;font-weight:700;display:inline-block">View Ticket Online & Download Pass</a></p>` : ''}
+        ${link ? `<p style="text-align:center;margin:24px 0 0"><a href="${esc(link)}" style="background:#14213D;color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:10px;font-size:13px;font-weight:700;display:inline-block">View Ticket Online & Download Pass</a></p>` : ''}
       </td></tr>
-      <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;text-align:center">
+      <tr><td style="padding:16px 28px;background:#FBF9F4;border-top:1px solid #E6E0D2;font-size:12px;color:#5A6275;text-align:center">
         This ticket is issued by CAIPSD, The Islamia University of Bahawalpur. Please do not share this QR pass with others.
       </td></tr>
     </table></td></tr></table></body></html>`;
@@ -135,24 +135,24 @@ async function sendTestEmail(recipient) {
   const transport = createTransport();
   if (!transport) throw new Error('Email is not configured. Please connect your Google / Gmail account in the portal.');
   const cfg = getMailConfig();
-  const html = `<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial,Helvetica,sans-serif;color:#18243a">
+  const html = `<!doctype html><html><body style="margin:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#14213D">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:28px 12px"><tr><td align="center">
-    <table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e8ee;box-shadow:0 4px 16px rgba(0,0,0,0.06)">
-      <tr><td style="background:linear-gradient(135deg, #1c304e 0%, #162740 100%);color:#ffffff;padding:26px 28px;border-bottom:3px solid #f59d14">
-        <div style="font-size:11px;letter-spacing:2px;color:#f59d14;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>
-        <div style="font-size:22px;font-weight:800;margin-top:6px;letter-spacing:-0.5px">CAIPSD Event System</div>
-        <div style="font-size:13px;color:#94a3b8;margin-top:2px">Email Integration Test</div>
+    <table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #E6E0D2">
+      <tr><td style="background:#ffffff;color:#14213D;padding:26px 28px;border-bottom:3px solid #B7791F">
+        <div style="font-size:11px;letter-spacing:2px;color:#8A5A12;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;margin-top:8px;letter-spacing:-0.5px;color:#14213D">CAIPSD Event System</div>
+        <div style="font-size:13px;color:#5A6275;margin-top:2px">Email Integration Test</div>
       </td></tr>
       <tr><td style="padding:26px 28px">
         <p style="margin:0 0 14px;font-size:15px;color:#16a34a;font-weight:700">✓ Google Account Connected Successfully!</p>
-        <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#4a566b">Your Google / Gmail account (<strong>${esc(cfg.user)}</strong>) is now connected with the CAIPSD Event Management Portal.</p>
-        <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#4a566b">You can now send tickets and QR passes to individual students, or email all registered students with <strong>1-Click</strong> directly from the portal desk.</p>
-        <div style="padding:14px 18px;background:#f8fafc;border-left:4px solid #2b5fdc;border-radius:6px;font-size:13px;color:#334155">
+        <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#3A445B">Your Google / Gmail account (<strong>${esc(cfg.user)}</strong>) is now connected with the CAIPSD Event Management Portal.</p>
+        <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#3A445B">You can now send tickets and QR passes to individual students, or email all registered students with <strong>1-Click</strong> directly from the portal desk.</p>
+        <div style="padding:14px 18px;background:#FBF9F4;border-left:4px solid #B7791F;border-radius:6px;font-size:13px;color:#3A445B">
           <strong>Connected sender:</strong> ${esc(cfg.fromName)} &lt;${esc(cfg.user)}&gt;<br>
           <strong>Timestamp:</strong> ${esc(new Date().toLocaleString('en-GB', { timeZone: TIMEZONE }))}
         </div>
       </td></tr>
-      <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;text-align:center">
+      <tr><td style="padding:16px 28px;background:#FBF9F4;border-top:1px solid #E6E0D2;font-size:12px;color:#5A6275;text-align:center">
         This is an automated test message from the CAIPSD Event Management System.
       </td></tr>
     </table></td></tr></table></body></html>`;
