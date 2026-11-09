@@ -525,6 +525,9 @@ app.post('/api/admin/tickets/email-all', requireAdmin, async (req, res, next) =>
       const r = await emailTicket(t);
       if (r.status === 'sent') sent++;
       else failed++;
+      if (tickets.length > 1 && !process.env.SMTP_JSON) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
     }
 
     res.json({

@@ -1068,7 +1068,7 @@ async function handleStaticApi(url, options = {}) {
         lastErr = err;
       }
       if (targets.length > 1) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
+        await new Promise((resolve) => setTimeout(resolve, 1200));
       }
     }
     saveLocalTickets(list);

@@ -109,47 +109,70 @@ function handleSendTicketEmail(sheet, recipient, ticketCode, name, opts) {
   var safeName = escapeHtml(name);
   var safeCode = escapeHtml(ticketCode);
   var safeLink = escapeHtml(viewLink);
+  var safeRecipient = escapeHtml(recipient);
 
-  var plainText = 'CAIPSD Event Admission Pass\n' +
-    'The Islamia University of Bahawalpur\n\n' +
-    'Hello ' + name + ',\n\n' +
-    'Your official admission pass for the CAIPSD Event is confirmed.\n\n' +
-    'Ticket ID: ' + ticketCode + '\n' +
-    'View and Download Pass: ' + viewLink + '\n\n' +
-    'Please show your QR code pass at the entrance for verification.\n\n' +
-    'Best regards,\n' +
-    'CAIPSD Event Management Team\n' +
-    'The Islamia University of Bahawalpur';
+  var ss = getSpreadsheet();
+  var senderEmail = 'saimmalik4728@gmail.com';
+  try {
+    senderEmail = Session.getActiveUser().getEmail() || ss.getOwner().getEmail() || 'saimmalik4728@gmail.com';
+  } catch (eMail) {}
+
+  var plainText = 'Official Admission Pass · CAIPSD Workshop\n' +
+    'The Islamia University of Bahawalpur\n' +
+    '----------------------------------------------------\n' +
+    'Hello ' + safeName + ',\n\n' +
+    'Your official admission pass and QR code for the CAIPSD Workshop has been confirmed.\n\n' +
+    'Participant Name: ' + safeName + '\n' +
+    'Ticket ID: ' + safeCode + '\n' +
+    'Venue: Baghdad-ul-Jadeed Campus, The Islamia University of Bahawalpur\n\n' +
+    'INSTRUCTIONS:\n' +
+    '- Please show your QR code pass at the entrance scanner for fast verification.\n' +
+    '- View or download your ticket online: ' + safeLink + '\n' +
+    '- Do not share this pass with anyone else.\n\n' +
+    '----------------------------------------------------\n' +
+    'Centre for Artificial Intelligence & Professional Skills Development (CAIPSD)\n' +
+    'The Islamia University of Bahawalpur, Baghdad-ul-Jadeed Campus, Bahawalpur 63100, Punjab, Pakistan\n' +
+    'Inquiries & Organizer Contact: ' + senderEmail + '\n';
 
   var qrImgTag = qrBlob
-    ? '<img src="cid:ticketqr" width="220" height="220" alt="Ticket QR code" style="display:block;margin:0 auto;border-radius:8px">'
+    ? '<img src="cid:ticketqr" width="220" height="220" alt="Ticket QR code" style="display:block;margin:0 auto;border-radius:8px;background:#ffffff;padding:8px;border:1px solid #e2e8f0">'
     : '<div style="font-size:13px;color:#64748b">QR image unavailable. Use the button below to open your pass.</div>';
 
-  var html = '<!doctype html><html><body style="margin:0;background:#f3f5f8;font-family:Arial,Helvetica,sans-serif;color:#18243a">' +
-    '<table width="100%" cellpadding="0" cellspacing="0" style="padding:28px 12px"><tr><td align="center">' +
-    '<table width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e8ee">' +
-    '<tr><td style="background:#1c304e;color:#ffffff;padding:26px 28px;border-bottom:3px solid #f59d14">' +
-    '<div style="font-size:11px;letter-spacing:2px;color:#f59d14;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>' +
-    '<div style="font-size:22px;font-weight:800;margin-top:6px">CAIPSD Event Ticket</div>' +
-    '<div style="font-size:13px;color:#94a3b8;margin-top:2px">Official Admission &amp; QR Pass</div>' +
+  var html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>CAIPSD Admission Pass</title></head><body style="margin:0;padding:0;background:#f3f5f8;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;color:#18243a">' +
+    '<!-- Hidden Preheader -->' +
+    '<div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;mso-hide:all;">' +
+    'Official admission pass and QR code for ' + safeName + ' · CAIPSD Workshop, The Islamia University of Bahawalpur.' +
+    '</div>' +
+    '<table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 10px;background:#f3f5f8"><tr><td align="center">' +
+    '<table width="540" cellpadding="0" cellspacing="0" style="max-width:540px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(0,0,0,0.04)">' +
+    '<tr><td style="background:#0d1930;color:#ffffff;padding:26px 28px;border-bottom:3px solid #f59d14">' +
+    '<div style="font-size:11px;letter-spacing:1.8px;color:#f59d14;font-weight:700;text-transform:uppercase">The Islamia University of Bahawalpur</div>' +
+    '<div style="font-size:22px;font-weight:800;margin-top:6px;letter-spacing:-0.3px;color:#ffffff">CAIPSD Admission Pass</div>' +
+    '<div style="font-size:13px;color:#94a3b8;margin-top:2px">Official Event &amp; QR Entrance Pass</div>' +
     '</td></tr>' +
-    '<tr><td style="padding:26px 28px">' +
-    '<p style="margin:0 0 14px;font-size:15px">Hello <strong>' + safeName + '</strong>,</p>' +
-    '<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#4a566b">Your official admission pass is confirmed. Show the QR pass below at the entrance for camera verification.</p>' +
-    '<div style="text-align:center;padding:20px;border:2px dashed #2b5fdc;background:#f8fafc;border-radius:12px">' +
+    '<tr><td style="padding:28px 28px 20px">' +
+    '<p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#1e293b">Dear <strong>' + safeName + '</strong>,</p>' +
+    '<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#475569">Your admission pass for the <strong>CAIPSD Event</strong> at The Islamia University of Bahawalpur has been confirmed. Please show the QR pass below at the entrance checkpoint for camera verification.</p>' +
+    '<div style="text-align:center;padding:22px;border:2px dashed #3b82f6;background:#f8fafc;border-radius:12px;margin:20px 0">' +
     qrImgTag +
-    '<div style="margin-top:14px;font-family:Consolas,monospace;font-size:18px;letter-spacing:3px;font-weight:800;color:#1c304e">' + safeCode + '</div>' +
+    '<div style="margin-top:14px;font-family:Consolas,monospace;font-size:18px;letter-spacing:3px;font-weight:800;color:#0f172a">' + safeCode + '</div>' +
     '<div style="margin-top:4px;font-size:12px;color:#64748b;font-weight:600">Scan at entrance for fast check-in</div>' +
     '</div>' +
-    '<p style="text-align:center;margin:24px 0 0"><a href="' + safeLink + '" style="background:#2b5fdc;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:13px;font-weight:700;display:inline-block">View Ticket Online &amp; Download Pass</a></p>' +
+    '<p style="text-align:center;margin:24px 0 10px"><a href="' + safeLink + '" style="background:#1d4ed8;color:#ffffff;text-decoration:none;padding:12px 26px;border-radius:8px;font-size:13px;font-weight:700;display:inline-block">View Ticket Online &amp; Download Pass</a></p>' +
     '</td></tr>' +
-    '<tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;text-align:center">' +
-    'This ticket is issued by CAIPSD, The Islamia University of Bahawalpur. Please do not share this QR pass with others.' +
+    '<tr><td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:11.5px;color:#64748b;line-height:1.6;text-align:center">' +
+    '<p style="margin:0 0 6px">This official confirmation pass was delivered to <strong>' + safeRecipient + '</strong> because you registered for the CAIPSD Event.</p>' +
+    '<p style="margin:0 0 6px">Centre for Artificial Intelligence &amp; Professional Skills Development &bull; The Islamia University of Bahawalpur</p>' +
+    '<p style="margin:0;color:#94a3b8">Baghdad-ul-Jadeed Campus, Bahawalpur 63100, Punjab, Pakistan &bull; Contact: ' + escapeHtml(senderEmail) + '</p>' +
     '</td></tr>' +
     '</table></td></tr></table></body></html>';
 
-  var mailSubject = 'Your CAIPSD Event Pass - ' + ticketCode;
-  var mailOptions = { htmlBody: html, name: 'CAIPSD Event Management' };
+  var mailSubject = 'CAIPSD Admission Pass · ' + safeName + ' [' + ticketCode + ']';
+  var mailOptions = {
+    htmlBody: html,
+    name: 'CAIPSD Events - The Islamia University of Bahawalpur',
+    replyTo: senderEmail
+  };
   if (qrBlob) {
     mailOptions.inlineImages = { ticketqr: qrBlob };
     mailOptions.attachments = [qrBlob];
