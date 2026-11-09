@@ -219,8 +219,8 @@ function formatGroupSheetRow(group) {
 
   const firstEntries = tickets.map(t => t.first_entry_at).filter(Boolean);
   const lastEntries = tickets.map(t => t.last_entry_at).filter(Boolean);
-  const firstEntry = firstEntries.length ? firstEntries.sort()[0] : '';
-  const lastEntry = lastEntries.length ? lastEntries.sort().reverse()[0] : '';
+  const firstEntry = firstEntries.length ? dateTimeLabel(firstEntries.sort()[0]) : '';
+  const lastEntry = lastEntries.length ? dateTimeLabel(lastEntries.sort().reverse()[0]) : '';
 
   return [
     `'${codeStr}`,
@@ -2199,6 +2199,9 @@ function showCheckinResult(type, message, ticket = null, extra = '') {
   const icon = type === 'success' ? '✓' : type === 'warning' ? '⚠' : '✕';
   let detailHtml = '';
   if (ticket) {
+    const lastScanHtml = ticket.last_entry_at
+      ? `<div class="result-last-entry" style="font-size:12.5px;color:var(--muted);margin-top:6px;padding-top:4px;border-top:1px dashed var(--line2);">Previous scan: <strong>${escapeHtml(dateTimeLabel(ticket.last_entry_at))}</strong> (${ticket.entry_count || 1} entry recorded)</div>`
+      : '';
     detailHtml = `
       <div class="result-ticket-details">
         <div class="result-attendee-name">${escapeHtml(ticket.full_name)}</div>
@@ -2207,6 +2210,7 @@ function showCheckinResult(type, message, ticket = null, extra = '') {
           <span class="meta-date">Valid: ${escapeHtml(dateTimeLabel(ticket.valid_until))}</span>
         </div>
         ${extra ? `<div class="result-ticket-status-pill">${escapeHtml(extra)}</div>` : ''}
+        ${lastScanHtml}
       </div>`;
   } else {
     detailHtml = `<small class="result-hint">Check ticket credentials and verify attendance records.</small>`;
@@ -2236,6 +2240,7 @@ async function performCheckin(ticketCode) {
     const dayMatch = ((result.ticket && result.ticket.full_name) || '').match(/\(Day\s*(\d+)\)/i);
     const visitInfo = dayMatch ? `Day ${dayMatch[1]} Pass · Entry Recorded` : 'Entry Recorded';
     showCheckinResult('success', result.message, result.ticket, visitInfo);
+    toast(`✓ ${result.message}`);
     note.textContent = result.message; note.className = 'scanner-message success';
     $('#ticket-code-input').value = '';
     refreshStats();
@@ -2256,12 +2261,15 @@ async function performCheckin(ticketCode) {
     if (isDayEarly) {
       displayHeadline = `Day ${earlyDayNum} Ticket! (Entry Denied)`;
       badgeText = `DAY ${earlyDayNum} TICKET · NOT ALLOWED TODAY`;
+      toast(`⚠ Day ${earlyDayNum} Ticket: Yeh ticket sirf Day ${earlyDayNum} par use ho sakta hai (Entry Denied).`, 'error');
     } else if (isAlreadyUsed) {
       displayHeadline = 'Already used ticket! (Entry Denied)';
       badgeText = 'ALREADY USED TICKET · ENTRY DENIED';
+      toast('⚠ Already used ticket! Yeh ticket pehle hi use ho chuka hai (Entry Denied).', 'error');
     } else {
       displayHeadline = error.message;
       badgeText = '';
+      toast(error.message, 'error');
     }
 
     showCheckinResult((isDayEarly || isAlreadyUsed) ? 'warning' : 'error', displayHeadline, error.data && error.data.ticket, badgeText);

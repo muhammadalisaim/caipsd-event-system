@@ -68,17 +68,24 @@ function saveSheetsConfig(data) {
   return getSheetsConfig();
 }
 
+function formatSheetDateTime(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return String(val);
+  return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
 function ticketToRow(t) {
   const code = t.ticket_code ? `'${String(t.ticket_code).replace(/^'/, '')}` : '';
   return [
     code,
     t.full_name || '',
-    t.issued_at || '',
-    t.valid_until || '',
-    t.status || 'valid',
+    formatSheetDateTime(t.issued_at),
+    formatSheetDateTime(t.valid_until),
+    (Number(t.entry_count) || 0) >= 1 ? 'Entered' : (t.status || 'valid'),
     t.entry_count ?? 0,
-    t.first_entry_at || '',
-    t.last_entry_at || ''
+    formatSheetDateTime(t.first_entry_at),
+    formatSheetDateTime(t.last_entry_at)
   ];
 }
 
@@ -138,12 +145,12 @@ function participantGroupToRow(group) {
     return [
       code,
       group.baseName || t.full_name || '',
-      t.issued_at || '',
-      t.valid_until || '',
-      t.status || 'valid',
+      formatSheetDateTime(t.issued_at),
+      formatSheetDateTime(t.valid_until),
+      (Number(t.entry_count) || 0) >= 1 ? 'Entered' : (t.status || 'valid'),
       t.entry_count ?? 0,
-      t.first_entry_at || '',
-      t.last_entry_at || ''
+      formatSheetDateTime(t.first_entry_at),
+      formatSheetDateTime(t.last_entry_at)
     ];
   }
 
@@ -182,14 +189,14 @@ function participantGroupToRow(group) {
   const issuedAt = tickets[0].issued_at || '';
   const firstEntries = tickets.map(t => t.first_entry_at).filter(Boolean);
   const lastEntries = tickets.map(t => t.last_entry_at).filter(Boolean);
-  const firstEntry = firstEntries.length ? firstEntries.sort()[0] : '';
-  const lastEntry = lastEntries.length ? lastEntries.sort().reverse()[0] : '';
+  const firstEntry = firstEntries.length ? formatSheetDateTime(firstEntries.sort()[0]) : '';
+  const lastEntry = lastEntries.length ? formatSheetDateTime(lastEntries.sort().reverse()[0]) : '';
 
   return [
     `'${codeStr}`,
     group.baseName,
-    issuedAt,
-    validUntil,
+    formatSheetDateTime(issuedAt),
+    formatSheetDateTime(validUntil),
     statusStr,
     entriesStr,
     firstEntry,
@@ -403,9 +410,11 @@ async function updateTicket(ticket, allParticipantTickets = null) {
     let baseName = ticket.full_name;
     if (Array.isArray(allParticipantTickets) && allParticipantTickets.length > 0) {
       const groups = groupTicketsByParticipant(allParticipantTickets);
-      if (groups.length > 0) {
-        row = participantGroupToRow(groups[0]);
-        baseName = groups[0].baseName;
+      const cleanTarget = baseName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+      const targetGroup = groups.find((g) => g.baseName.toLowerCase() === cleanTarget) || groups[0];
+      if (targetGroup) {
+        row = participantGroupToRow(targetGroup);
+        baseName = targetGroup.baseName;
       }
     }
     if (!row) {

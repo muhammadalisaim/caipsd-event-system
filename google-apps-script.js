@@ -267,7 +267,7 @@ function doPost(e) {
     if (action === 'updateTicket' || action === 'update') {
       var ticketCode = payload.ticketCode || (payload.ticket && payload.ticket.ticket_code);
       var updatedRow = payload.row;
-      if (payload.ticket && (!updatedRow || updatedRow.length !== sheet.getLastColumn())) {
+      if (!updatedRow && payload.ticket) {
         updatedRow = buildRowForTicket(sheet, payload.ticket);
       }
       if (ticketCode && updatedRow) {
@@ -288,10 +288,10 @@ function doPost(e) {
           }
 
           var existingLastEntry = String(existingData[lastEntryColIdx] || '').trim();
-          var existingEntries = Number(existingData[entriesColIdx] || 0);
+          var existingEntries = parseInt(String(existingData[entriesColIdx] || '0').replace(/^[^\d]*/, ''), 10) || 0;
 
           var newLastEntry = String(updatedRow[lastEntryColIdx] || '').trim();
-          var newEntries = Number(updatedRow[entriesColIdx] || 0);
+          var newEntries = parseInt(String(updatedRow[entriesColIdx] || '0').replace(/^[^\d]*/, ''), 10) || 0;
 
           if (existingLastEntry && existingEntries > 0) {
             var existingDay = '';

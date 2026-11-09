@@ -694,7 +694,7 @@ async function handleCheckinRequest(req, res, next) {
     })();
     const updated = serializeTicket(getTicketById(ticket.id));
     const baseName = (ticket.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
-    const siblingTickets = db.prepare('SELECT * FROM tickets WHERE full_name LIKE ? OR full_name = ?').all(`${baseName}%`, baseName).map(serializeTicket);
+    const siblingTickets = db.prepare('SELECT * FROM tickets WHERE full_name = ? OR full_name LIKE ?').all(baseName, `${baseName} (Day %)`).map(serializeTicket);
     sheetsUpdateTicket(updated, siblingTickets).catch((err) => console.error('Sheet update error:', err.message));
 
     const dayNumber = updated.entry_count;
