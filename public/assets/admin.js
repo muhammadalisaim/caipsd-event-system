@@ -1166,15 +1166,76 @@ async function refreshStats() {
   try { renderStats(await api('/api/admin/summary')); } catch (error) { console.error(error); }
 }
 
-function participantCell(row) {
-  const initials = row.full_name.trim().split(/\s+/).slice(0, 2).map((word) => word[0] || '').join('').toUpperCase();
-  const sub = row.email ? escapeHtml(row.email) : (row.phone ? escapeHtml(row.phone) : 'Direct Ticket');
-  return `<div class="participant-cell"><span class="participant-avatar">${escapeHtml(initials)}</span><span><strong>${escapeHtml(row.full_name)}</strong><small>${sub}</small></span></div>`;
+let currentGroupedMap = new Map();
+let activeGroupForPrint = null;
+
+function groupTicketsByParticipant(tickets) {
+  const groups = new Map();
+  for (const t of tickets) {
+    const rawName = String(t.full_name || 'Participant').trim();
+    const baseName = rawName.replace(/\s*\((?:Day\s*[12]|Day1|Day2)\)$/i, '').trim();
+    const email = String(t.email || '').trim().toLowerCase();
+    const phone = String(t.phone || '').trim();
+    const key = `${baseName.toLowerCase()}::${email}::${phone}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        baseName,
+        email,
+        phone,
+        validUntil: t.valid_until,
+        tickets: []
+      });
+    }
+    groups.get(key).tickets.push(t);
+  }
+
+  // Sort each group's tickets: Day 1 first, then Day 2
+  for (const g of groups.values()) {
+    g.tickets.sort((a, b) => {
+      const isDay1A = /\(Day\s*1\)/i.test(a.full_name);
+      const isDay1B = /\(Day\s*1\)/i.test(b.full_name);
+      if (isDay1A && !isDay1B) return -1;
+      if (!isDay1A && isDay1B) return 1;
+      return a.id - b.id;
+    });
+  }
+
+  currentGroupedMap = groups;
+  return Array.from(groups.values());
 }
+
+function participantCell(group) {
+  const initials = group.baseName.trim().split(/\s+/).slice(0, 2).map((word) => word[0] || '').join('').toUpperCase();
+  const sub = group.email ? escapeHtml(group.email) : (group.phone ? escapeHtml(group.phone) : 'Direct Ticket');
+  const countBadge = group.tickets.length > 1 ? `<span class="pass-count-badge">${group.tickets.length} Passes</span>` : '';
+  return `<div class="participant-cell"><span class="participant-avatar">${escapeHtml(initials)}</span><span><strong>${escapeHtml(group.baseName)}${countBadge}</strong><small>${sub}</small></span></div>`;
+}
+
+function groupedPill(group) {
+  const allExpired = group.tickets.every((t) => t.status === 'expired' || new Date(t.valid_until).getTime() <= Date.now());
+  if (allExpired) return pill('closed', 'Expired');
+  const totalEntries = group.tickets.reduce((sum, t) => sum + (Number(t.entry_count) || 0), 0);
+  const totalMax = group.tickets.reduce((sum, t) => sum + (Number(t.max_days) || 1), 0);
+  if (totalEntries >= totalMax) return pill('open', `Completed (${totalEntries}/${totalMax})`);
+  if (totalEntries > 0) return pill('checked_in', `Day ${totalEntries} Entered (${totalEntries}/${totalMax})`);
+  return pill('draft', `Not Entered (0/${totalMax})`);
+}
+
 function ticketsTable(rows, withActions) {
   if (!rows.length) return '<div class="empty-table">No tickets found. Use “Issue ticket” or “Bulk issue” to create tickets.</div>';
+  const groups = groupTicketsByParticipant(rows);
   const head = `<tr><th>PARTICIPANT</th><th>PHONE / INFO</th><th>TICKET ID</th><th>VALID UNTIL</th><th>ATTENDANCE</th>${withActions ? '<th>ACTION</th>' : ''}</tr>`;
-  const body = rows.map((row) => `<tr><td>${participantCell(row)}</td><td>${escapeHtml(row.phone || '—')}</td><td><strong>${escapeHtml(row.ticket_code)}</strong></td><td>${escapeHtml(dateTimeLabel(row.valid_until))}</td><td>${ticketPill(row)}</td>${withActions ? `<td><div class="row-actions"><a class="status-action" href="ticket.html?code=${encodeURIComponent(row.ticket_code)}" target="_blank" rel="noopener">View / Print</a><button class="status-action danger cancel-ticket" data-id="${row.id}" data-name="${escapeHtml(row.full_name)}">Cancel</button></div></td>` : ''}</tr>`).join('');
+  const body = groups.map((g) => {
+    let codeHtml;
+    if (g.tickets.length === 2) {
+      codeHtml = `<div class="grouped-codes"><span>Day 1: <code>${escapeHtml(g.tickets[0].ticket_code)}</code></span><span>Day 2: <code>${escapeHtml(g.tickets[1].ticket_code)}</code></span></div>`;
+    } else {
+      codeHtml = `<strong>${escapeHtml(g.tickets[0].ticket_code)}</strong>`;
+    }
+    const actionsHtml = withActions ? `<td><div class="row-actions"><button type="button" class="status-action open-passes-modal" data-key="${escapeHtml(g.key)}">View / Print</button><button type="button" class="status-action danger cancel-group" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
+    return `<tr class="participant-row" data-key="${escapeHtml(g.key)}" style="cursor:pointer;"><td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${escapeHtml(dateTimeLabel(g.validUntil))}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
+  }).join('');
   return `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
@@ -1190,12 +1251,31 @@ async function loadTickets() {
   try {
     const data = await api(`/api/admin/tickets?${params.toString()}`);
     $('#tickets-table').innerHTML = ticketsTable(data.tickets, true);
-    $$('.cancel-ticket').forEach((button) => button.addEventListener('click', async () => {
-      if (!confirm(`Cancel the ticket for ${button.dataset.name}? Its QR code will stop working.`)) return;
+
+    $$('.open-passes-modal').forEach((button) => button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const group = currentGroupedMap.get(button.dataset.key);
+      if (group) openPassesModal(group);
+    }));
+
+    $$('.participant-row').forEach((row) => row.addEventListener('click', (e) => {
+      if (e.target.closest('button, a')) return;
+      const group = currentGroupedMap.get(row.dataset.key);
+      if (group) openPassesModal(group);
+    }));
+
+    $$('.cancel-group').forEach((button) => button.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const group = currentGroupedMap.get(button.dataset.key);
+      if (!group) return;
+      const count = group.tickets.length;
+      if (!confirm(`Cancel ${count} ticket${count === 1 ? '' : 's'} for ${group.baseName}? QR code${count === 1 ? '' : 's'} will stop working.`)) return;
       button.disabled = true;
       try {
-        const result = await api(`/api/admin/tickets/${button.dataset.id}`, { method: 'DELETE' });
-        toast(result.message);
+        for (const t of group.tickets) {
+          await api(`/api/admin/tickets/${t.id}`, { method: 'DELETE' });
+        }
+        toast(`Tickets cancelled for ${group.baseName}.`);
         await loadTickets(); refreshStats();
       } catch (error) { toast(error.message, 'error'); button.disabled = false; }
     }));
@@ -1330,6 +1410,126 @@ $('#duration-form')?.addEventListener('submit', async (e) => {
     }
   }
 });
+
+/* ---- View Passes Modal ---- */
+const viewPassesModal = $('#view-passes-modal');
+function openPassesModal(group) {
+  if (!group || !group.tickets || !group.tickets.length) return;
+  activeGroupForPrint = group;
+  lastFocused = document.activeElement;
+  if ($('#view-passes-modal-title')) {
+    $('#view-passes-modal-title').innerHTML = `Passes for <em>${escapeHtml(group.baseName)}.</em>`;
+  }
+  if ($('#view-passes-modal-subcopy')) {
+    $('#view-passes-modal-subcopy').textContent = `${group.tickets.length} pass${group.tickets.length === 1 ? '' : 'es'} issued · Valid until ${dateTimeLabel(group.validUntil)}`;
+  }
+
+  const container = $('#passes-cards-container');
+  if (container) {
+    container.innerHTML = group.tickets.map((t) => {
+      const isDay2 = /\(Day\s*2\)/i.test(t.full_name);
+      const isDay1 = /\(Day\s*1\)/i.test(t.full_name);
+      const passTag = isDay2 ? 'Day 2 Pass' : (isDay1 ? 'Day 1 Pass' : 'Admission Pass');
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=6&data=${encodeURIComponent(t.ticket_code)}`;
+      return `
+        <div class="pass-card-item">
+          <span class="pass-card-tag">${passTag}</span>
+          <div class="pass-card-qr">
+            <img src="${qrUrl}" alt="QR code for ${escapeHtml(t.ticket_code)}" />
+          </div>
+          <div class="pass-card-code">${escapeHtml(t.ticket_code)}</div>
+          <div class="pass-card-status">${ticketPill(t)}</div>
+          <div class="pass-card-actions">
+            <a class="admin-button admin-button-primary" href="ticket.html?code=${encodeURIComponent(t.ticket_code)}" target="_blank" rel="noopener">Open Pass ↗</a>
+            <button type="button" class="admin-button admin-button-light copy-single-code" data-code="${escapeHtml(t.ticket_code)}">Copy ID</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.querySelectorAll('.copy-single-code').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(btn.dataset.code);
+          toast(`✓ Copied ${btn.dataset.code}`);
+        } catch {
+          toast(`ID: ${btn.dataset.code}`);
+        }
+      });
+    });
+  }
+
+  if (viewPassesModal) viewPassesModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closePassesModal() {
+  if (viewPassesModal) viewPassesModal.hidden = true;
+  document.body.style.overflow = '';
+  if (lastFocused && lastFocused.focus) lastFocused.focus();
+}
+
+$('#close-view-passes-modal')?.addEventListener('click', closePassesModal);
+$('#close-passes-btn')?.addEventListener('click', closePassesModal);
+viewPassesModal?.addEventListener('click', (event) => { if (event.target === viewPassesModal) closePassesModal(); });
+
+function printBothPasses() {
+  if (!activeGroupForPrint) return;
+  const group = activeGroupForPrint;
+  const printWindow = window.open('', '_blank', 'width=850,height=700');
+  if (!printWindow) {
+    alert('Please allow popups to print passes.');
+    return;
+  }
+  const passesHtml = group.tickets.map((t) => {
+    const isDay2 = /\(Day\s*2\)/i.test(t.full_name);
+    const isDay1 = /\(Day\s*1\)/i.test(t.full_name);
+    const passTag = isDay2 ? 'Day 2 Pass · Single Entry' : (isDay1 ? 'Day 1 Pass · Single Entry' : 'Admission Pass');
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=${encodeURIComponent(t.ticket_code)}`;
+    return `
+      <div style="flex:1;min-width:300px;max-width:360px;border:2px solid #14213D;border-radius:12px;padding:20px;text-align:center;box-sizing:border-box;background:#ffffff;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;color:#8A5A12;text-transform:uppercase;">The Islamia University of Bahawalpur</div>
+        <div style="font-size:18px;font-weight:800;color:#14213D;margin-top:4px;">CAIPSD EVENT PASS</div>
+        <div style="display:inline-block;padding:3px 12px;background:#14213D;color:#ffffff;border-radius:20px;font-size:11px;font-weight:700;margin:8px 0;">${passTag}</div>
+        <div style="font-size:17px;font-weight:700;color:#14213D;margin:8px 0 4px;">${escapeHtml(group.baseName)}</div>
+        <div style="margin:12px auto;width:170px;height:170px;border:1px solid #ddd;border-radius:8px;padding:6px;background:#fff;">
+          <img src="${qrUrl}" style="width:100%;height:100%;display:block;" />
+        </div>
+        <div style="font-family:monospace;font-size:16px;font-weight:800;letter-spacing:2px;color:#14213D;margin-top:6px;">${escapeHtml(t.ticket_code)}</div>
+        <div style="font-size:11px;color:#555;margin-top:4px;">Present at entrance for scan verification</div>
+      </div>
+    `;
+  }).join('');
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>CAIPSD Passes - ${escapeHtml(group.baseName)}</title>
+        <style>
+          @page { size: auto; margin: 15mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #fff; color: #14213D; }
+          .passes-wrap { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
+          @media print { .no-print { display: none !important; } }
+        </style>
+      </head>
+      <body>
+        <div class="no-print" style="text-align:center;margin-bottom:20px;">
+          <button onclick="window.print()" style="padding:10px 24px;font-size:14px;font-weight:700;background:#14213D;color:#fff;border:none;border-radius:8px;cursor:pointer;">Print / Save as PDF 🖨️</button>
+        </div>
+        <div style="text-align:center;border-bottom:2px solid #E6E0D2;padding-bottom:12px;margin-bottom:20px;">
+          <h2 style="margin:0;font-size:22px;color:#14213D;">CAIPSD — The Islamia University of Bahawalpur</h2>
+          <p style="margin:4px 0 0;color:#555;font-size:13px;">Official Event Admission Passes for <strong>${escapeHtml(group.baseName)}</strong></p>
+        </div>
+        <div class="passes-wrap">${passesHtml}</div>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+}
+
+$('#print-both-passes-btn')?.addEventListener('click', printBothPasses);
 
 /* ---- Google Mail Modal ---- */
 const mailModal = $('#mail-modal');
@@ -1586,7 +1786,7 @@ $('#email-all-form')?.addEventListener('submit', async (event) => {
 
 /* Modal keyboard accessibility */
 document.addEventListener('keydown', (event) => {
-  const activeModal = [ticketModal, bulkModal, durationModal, mailModal, emailAllModal].find((m) => m && !m.hidden);
+  const activeModal = [ticketModal, bulkModal, durationModal, mailModal, emailAllModal, viewPassesModal].find((m) => m && !m.hidden);
   if (!activeModal) return;
   if (event.key === 'Escape') {
     if (activeModal === ticketModal) closeTicketModal();
@@ -1594,6 +1794,7 @@ document.addEventListener('keydown', (event) => {
     else if (activeModal === durationModal) closeDurationModal();
     else if (activeModal === mailModal) closeMailModal();
     else if (activeModal === emailAllModal) closeEmailAllModal();
+    else if (activeModal === viewPassesModal) closePassesModal();
     return;
   }
   if (event.key !== 'Tab') return;

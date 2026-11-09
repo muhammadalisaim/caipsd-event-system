@@ -337,3 +337,17 @@ h1,h2,h3{font-family:var(--display);color:var(--ink)}
   .heading-actions .admin-button{flex:1}
   .toast-region{left:16px;right:16px;bottom:16px;max-width:none}
 }
+
+.passes-cards-container{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin:18px 0}
+.pass-card-item{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:14px;padding:18px 16px;display:flex;flex-direction:column;align-items:center;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,0.02)}
+.pass-card-tag{display:inline-block;padding:3px 10px;background:#14213d;color:#fff;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:0.5px;margin-bottom:12px}
+.pass-card-qr{width:140px;height:140px;background:#fff;padding:6px;border-radius:10px;border:1px solid #cbd5e1;margin-bottom:10px;display:flex;align-items:center;justify-content:center}
+.pass-card-qr img{width:100%;height:100%;display:block}
+.pass-card-code{font-family:Consolas,monospace;font-size:14px;font-weight:700;letter-spacing:1px;color:#14213d;margin-bottom:6px}
+.pass-card-status{margin-bottom:14px}
+.pass-card-actions{display:flex;gap:8px;width:100%;margin-top:auto}
+.pass-card-actions a,.pass-card-actions button{flex:1;padding:8px 10px;font-size:11.5px;text-align:center}
+.pass-count-badge{display:inline-block;padding:2px 7px;background:rgba(183,121,31,0.12);color:#8A5A12;border-radius:6px;font-size:10.5px;font-weight:700;margin-left:6px;vertical-align:middle}
+.grouped-codes{display:flex;flex-direction:column;gap:3px;font-size:11px}
+.grouped-codes code{background:rgba(20,33,61,0.06);padding:2px 6px;border-radius:4px;font-weight:600}
+

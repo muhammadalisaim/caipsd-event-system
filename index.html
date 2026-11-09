@@ -500,6 +500,20 @@
         </div>
       </form>
     </section>
+  <div id="view-passes-modal" class="admin-modal-backdrop" hidden>
+    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="view-passes-modal-title" style="max-width: 680px;">
+      <button class="admin-modal-close" id="close-view-passes-modal" aria-label="Close">×</button>
+      <div class="admin-kicker">PARTICIPANT PASSES</div>
+      <h2 id="view-passes-modal-title">Participant <em>Tickets.</em></h2>
+      <p class="modal-subcopy" id="view-passes-modal-subcopy">Showing all issued passes for this participant.</p>
+
+      <div id="passes-cards-container" class="passes-cards-container"></div>
+
+      <div class="modal-actions" style="margin-top: 1.5rem; justify-content: space-between;">
+        <button type="button" class="admin-button admin-button-light" id="close-passes-btn">Close</button>
+        <button type="button" class="admin-button admin-button-primary" id="print-both-passes-btn">Print Both Passes <span>🖨️</span></button>
+      </div>
+    </section>
   </div>
   <script src="assets/html5-qrcode.min.js" defer></script>
   <script src="assets/admin.js?v=2.2.0" defer></script>
