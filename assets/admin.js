@@ -1152,7 +1152,10 @@ async function loadDashboard() {
   try {
     const [summary, list] = await Promise.all([api('/api/admin/summary'), api('/api/admin/tickets')]);
     renderStats(summary);
-    $('#recent-tickets').innerHTML = ticketsTable(list.tickets.slice(0, 6), false);
+    recentTicketsGroups = [];
+    const container = $('#recent-tickets');
+    container.innerHTML = ticketsTable(list.tickets.slice(0, 6), false, recentTicketsGroups);
+    bindTicketsTableEvents(container, recentTicketsGroups);
   } catch (error) { console.error('Dashboard load failed:', error); }
 }
 function renderStats(s) {
@@ -1166,6 +1169,8 @@ async function refreshStats() {
   try { renderStats(await api('/api/admin/summary')); } catch (error) { console.error(error); }
 }
 
+let currentTicketsGroups = [];
+let recentTicketsGroups = [];
 let currentGroupedMap = new Map();
 let activeGroupForPrint = null;
 
@@ -1222,21 +1227,69 @@ function groupedPill(group) {
   return pill('draft', `Not Entered (0/${totalMax})`);
 }
 
-function ticketsTable(rows, withActions) {
-  if (!rows.length) return '<div class="empty-table">No tickets found. Use “Issue ticket” or “Bulk issue” to create tickets.</div>';
-  const groups = groupTicketsByParticipant(rows);
+function ticketsTable(rows, withActions, groupStorage = null) {
+  if (!rows || !rows.length) return '<div class="empty-table">No tickets found. Use “Issue ticket” or “Bulk issue” to create tickets.</div>';
+  const groups = (rows[0] && Array.isArray(rows[0].tickets)) ? rows : groupTicketsByParticipant(rows);
+  if (groupStorage && Array.isArray(groupStorage)) {
+    groupStorage.length = 0;
+    groupStorage.push(...groups);
+  }
   const head = `<tr><th>PARTICIPANT</th><th>PHONE / INFO</th><th>TICKET ID</th><th>VALID UNTIL</th><th>ATTENDANCE</th>${withActions ? '<th>ACTION</th>' : ''}</tr>`;
-  const body = groups.map((g) => {
+  const body = groups.map((g, idx) => {
     let codeHtml;
     if (g.tickets.length === 2) {
       codeHtml = `<div class="grouped-codes"><span>Day 1: <code>${escapeHtml(g.tickets[0].ticket_code)}</code></span><span>Day 2: <code>${escapeHtml(g.tickets[1].ticket_code)}</code></span></div>`;
     } else {
       codeHtml = `<strong>${escapeHtml(g.tickets[0].ticket_code)}</strong>`;
     }
-    const actionsHtml = withActions ? `<td><div class="row-actions"><button type="button" class="status-action open-passes-modal" data-key="${escapeHtml(g.key)}">View / Print</button><button type="button" class="status-action danger cancel-group" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
-    return `<tr class="participant-row" data-key="${escapeHtml(g.key)}" style="cursor:pointer;"><td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${escapeHtml(dateTimeLabel(g.validUntil))}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
+    const actionsHtml = withActions ? `<td><div class="row-actions"><button type="button" class="status-action open-passes-modal" data-index="${idx}" data-key="${escapeHtml(g.key)}">View / Print</button><button type="button" class="status-action danger cancel-group" data-index="${idx}" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
+    return `<tr class="participant-row" data-index="${idx}" data-key="${escapeHtml(g.key)}" style="cursor:pointer;" title="Click to view passes"><td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${escapeHtml(dateTimeLabel(g.validUntil))}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
   }).join('');
   return `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+function bindTicketsTableEvents(container, groups) {
+  if (!container || !groups) return;
+  container.querySelectorAll('.open-passes-modal').forEach((button) => {
+    button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = Number(button.dataset.index);
+      const group = groups[idx] || (currentGroupedMap ? currentGroupedMap.get(button.dataset.key) : null);
+      if (group) openPassesModal(group);
+    });
+  });
+
+  container.querySelectorAll('.participant-row').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button, a')) return;
+      const idx = Number(row.dataset.index);
+      const group = groups[idx] || (currentGroupedMap ? currentGroupedMap.get(row.dataset.key) : null);
+      if (group) openPassesModal(group);
+    });
+  });
+
+  container.querySelectorAll('.cancel-group').forEach((button) => {
+    button.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const idx = Number(button.dataset.index);
+      const group = groups[idx] || (currentGroupedMap ? currentGroupedMap.get(button.dataset.key) : null);
+      if (!group) return;
+      const count = group.tickets.length;
+      if (!confirm(`Cancel ${count} ticket${count === 1 ? '' : 's'} for ${group.baseName}? QR code${count === 1 ? '' : 's'} will stop working.`)) return;
+      button.disabled = true;
+      try {
+        for (const t of group.tickets) {
+          await api(`/api/admin/tickets/${t.id}`, { method: 'DELETE' });
+        }
+        toast(`Tickets cancelled for ${group.baseName}.`);
+        await loadTickets();
+        refreshStats();
+      } catch (error) {
+        toast(error.message, 'error');
+        button.disabled = false;
+      }
+    });
+  });
 }
 
 async function loadTickets() {
@@ -1250,35 +1303,10 @@ async function loadTickets() {
   if (status) params.set('status', status);
   try {
     const data = await api(`/api/admin/tickets?${params.toString()}`);
-    $('#tickets-table').innerHTML = ticketsTable(data.tickets, true);
-
-    $$('.open-passes-modal').forEach((button) => button.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const group = currentGroupedMap.get(button.dataset.key);
-      if (group) openPassesModal(group);
-    }));
-
-    $$('.participant-row').forEach((row) => row.addEventListener('click', (e) => {
-      if (e.target.closest('button, a')) return;
-      const group = currentGroupedMap.get(row.dataset.key);
-      if (group) openPassesModal(group);
-    }));
-
-    $$('.cancel-group').forEach((button) => button.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const group = currentGroupedMap.get(button.dataset.key);
-      if (!group) return;
-      const count = group.tickets.length;
-      if (!confirm(`Cancel ${count} ticket${count === 1 ? '' : 's'} for ${group.baseName}? QR code${count === 1 ? '' : 's'} will stop working.`)) return;
-      button.disabled = true;
-      try {
-        for (const t of group.tickets) {
-          await api(`/api/admin/tickets/${t.id}`, { method: 'DELETE' });
-        }
-        toast(`Tickets cancelled for ${group.baseName}.`);
-        await loadTickets(); refreshStats();
-      } catch (error) { toast(error.message, 'error'); button.disabled = false; }
-    }));
+    currentTicketsGroups = [];
+    const container = $('#tickets-table');
+    container.innerHTML = ticketsTable(data.tickets, true, currentTicketsGroups);
+    bindTicketsTableEvents(container, currentTicketsGroups);
   } catch (error) { $('#tickets-table').innerHTML = `<div class="empty-table">${escapeHtml(error.message)}</div>`; }
 }
 $('#search-tickets').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadTickets, 250); });
@@ -1460,19 +1488,32 @@ function openPassesModal(group) {
     });
   }
 
-  if (viewPassesModal) viewPassesModal.hidden = false;
+  const modal = $('#view-passes-modal') || viewPassesModal;
+  if (modal) {
+    modal.hidden = false;
+    modal.removeAttribute('hidden');
+    modal.style.display = 'flex';
+  }
   document.body.style.overflow = 'hidden';
 }
 
 function closePassesModal() {
-  if (viewPassesModal) viewPassesModal.hidden = true;
+  const modal = $('#view-passes-modal') || viewPassesModal;
+  if (modal) {
+    modal.hidden = true;
+    modal.setAttribute('hidden', '');
+    modal.style.display = 'none';
+  }
   document.body.style.overflow = '';
   if (lastFocused && lastFocused.focus) lastFocused.focus();
 }
 
 $('#close-view-passes-modal')?.addEventListener('click', closePassesModal);
 $('#close-passes-btn')?.addEventListener('click', closePassesModal);
-viewPassesModal?.addEventListener('click', (event) => { if (event.target === viewPassesModal) closePassesModal(); });
+$('#view-passes-modal')?.addEventListener('click', (event) => {
+  const modal = $('#view-passes-modal') || viewPassesModal;
+  if (event.target === modal) closePassesModal();
+});
 
 function printBothPasses() {
   if (!activeGroupForPrint) return;
