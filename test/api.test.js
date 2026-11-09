@@ -284,6 +284,17 @@ test('configurable duration (2, 3, 4 days) and check-in limits', async () => {
   assert.equal(d2.status, 409);
   assert.ok(d2.data.alreadyUsed);
 
+  // Gate Active Day mode allows verifying Day 2 and Day 3 passes directly
+  const day3OnGate2 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3Res.data.tickets[2].ticket_code, activeDay: 2 } });
+  assert.equal(day3OnGate2.status, 409);
+  assert.match(day3OnGate2.data.error, /Day 3 Ticket/);
+
+  const day2OnGate2 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3Res.data.tickets[1].ticket_code, activeDay: 2 } });
+  assert.equal(day2OnGate2.status, 200);
+
+  const day3OnGate3 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3Res.data.tickets[2].ticket_code, activeDay: 3 } });
+  assert.equal(day3OnGate3.status, 200);
+
   // Reset duration back to 2 days
   await call('/api/admin/settings/duration', { method: 'POST', body: { validDays: 2 } });
 });

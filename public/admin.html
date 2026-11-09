@@ -87,6 +87,17 @@
                 <p class="console-desc">Scan attendee QR pass or enter 16-character Ticket ID for instant calendar-day validation.</p>
               </div>
               <div class="console-policy-pills">
+                <div class="scanner-day-select-box" title="Gate Day Mode: Select specific event day or leave on Auto">
+                  <span class="gate-day-icon">📅</span>
+                  <label for="scanner-active-day" class="gate-day-label">Active Gate Day:</label>
+                  <select id="scanner-active-day" class="scanner-active-day-select">
+                    <option value="auto">Auto (Today's Day)</option>
+                    <option value="1">Day 1 Gate</option>
+                    <option value="2">Day 2 Gate</option>
+                    <option value="3">Day 3 Gate</option>
+                    <option value="4">Day 4 Gate</option>
+                  </select>
+                </div>
                 <div class="policy-chip chip-green">
                   <span class="chip-dot"></span>
                   <span>1 Scan / Day Enforced</span>

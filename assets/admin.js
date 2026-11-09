@@ -97,24 +97,93 @@ function getGoogleWebAppUrl() {
   return localStorage.getItem('caipsd_sheets_webhook_url') || GOOGLE_WEB_APP_URL;
 }
 
-function pushTicketToSheet(ticket, type = 'appendTicket') {
-  const url = getGoogleWebAppUrl();
-  if (!ticket || !url) return Promise.resolve({ status: 'skipped' });
-  const row = [
-    `'${ticket.ticket_code}`,
-    ticket.full_name || '',
-    ticket.issued_at || '',
-    ticket.valid_until || '',
-    ticket.status || 'valid',
-    ticket.entry_count != null ? ticket.entry_count : 0,
-    ticket.first_entry_at || '',
-    ticket.last_entry_at || ''
+function formatGroupSheetRow(group) {
+  const tickets = group.tickets;
+  if (!tickets || tickets.length === 0) return [];
+  if (tickets.length === 1) {
+    const t = tickets[0];
+    return [
+      `'${t.ticket_code}`,
+      group.baseName || t.full_name || '',
+      t.issued_at || '',
+      t.valid_until || '',
+      t.status || 'valid',
+      t.entry_count != null ? t.entry_count : 0,
+      t.first_entry_at || '',
+      t.last_entry_at || ''
+    ];
+  }
+
+  const codeStr = tickets.map((t, idx) => {
+    const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+    const dayLabel = m ? `Day ${m[1]}` : `Day ${idx + 1}`;
+    return `${dayLabel}: ${t.ticket_code}`;
+  }).join(' | ');
+
+  const totalEntries = tickets.reduce((sum, t) => sum + (Number(t.entry_count) || 0), 0);
+  const totalMax = tickets.length;
+  const entriesBreakdown = tickets.map((t, idx) => {
+    const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+    const dayLabel = m ? `Day ${m[1]}` : `Day ${idx + 1}`;
+    return `${dayLabel}: ${Number(t.entry_count) || 0}`;
+  }).join(', ');
+  const entriesStr = `${totalEntries}/${totalMax} (${entriesBreakdown})`;
+
+  const allUsed = tickets.every((t) => (Number(t.entry_count) || 0) >= 1);
+  const anyUsed = tickets.some((t) => (Number(t.entry_count) || 0) >= 1);
+  let statusStr = 'valid';
+  if (allUsed) {
+    statusStr = `Completed (${totalEntries}/${totalMax})`;
+  } else if (anyUsed) {
+    const enteredDays = tickets.filter((t) => (Number(t.entry_count) || 0) >= 1).map((t, idx) => {
+      const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+      return m ? `Day ${m[1]}` : `Day ${idx + 1}`;
+    }).join(', ');
+    statusStr = `${enteredDays} Entered`;
+  }
+
+  const firstEntries = tickets.map(t => t.first_entry_at).filter(Boolean);
+  const lastEntries = tickets.map(t => t.last_entry_at).filter(Boolean);
+  const firstEntry = firstEntries.length ? firstEntries.sort()[0] : '';
+  const lastEntry = lastEntries.length ? lastEntries.sort().reverse()[0] : '';
+
+  return [
+    `'${codeStr}`,
+    group.baseName,
+    tickets[0].issued_at || '',
+    tickets[0].valid_until || '',
+    statusStr,
+    entriesStr,
+    firstEntry,
+    lastEntry
   ];
+}
+
+function pushTicketToSheet(ticketOrTickets, type = 'appendTicket') {
+  const url = getGoogleWebAppUrl();
+  if (!ticketOrTickets || !url) return Promise.resolve({ status: 'skipped' });
+
+  let tickets = Array.isArray(ticketOrTickets) ? ticketOrTickets : [ticketOrTickets];
+  const list = getLocalTickets();
+  const rawFirst = tickets[0];
+  const rawName = String(rawFirst.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+  const allForPerson = list.filter((x) => {
+    const xBase = String(x.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+    return xBase.toLowerCase() === rawName.toLowerCase();
+  });
+  if (allForPerson.length > tickets.length) {
+    tickets = allForPerson;
+  }
+  const groups = groupTicketsByParticipant(tickets);
+  const group = groups[0] || { baseName: rawName, tickets };
+  const row = formatGroupSheetRow(group);
+
   const payload = {
     action: type === 'append' ? 'appendTicket' : (type === 'update' ? 'updateTicket' : type),
     sheetName: 'CAIPSD_Tickets',
-    ticketCode: ticket.ticket_code,
-    ticket: ticket,
+    fullName: group.baseName,
+    ticketCode: rawFirst.ticket_code,
+    ticket: rawFirst,
     row: row
   };
   return fetch(url, {
@@ -145,16 +214,8 @@ function pushTicketToSheet(ticket, type = 'appendTicket') {
 async function syncAllTicketsToSheet(tickets) {
   const url = getGoogleWebAppUrl();
   if (!url) return { status: 'skipped', message: 'No Google Web App URL configured' };
-  const rows = (tickets || []).map((t) => [
-    `'${t.ticket_code}`,
-    t.full_name || '',
-    t.issued_at || '',
-    t.valid_until || '',
-    t.status || 'valid',
-    t.entry_count != null ? t.entry_count : 0,
-    t.first_entry_at || '',
-    t.last_entry_at || ''
-  ]);
+  const groups = groupTicketsByParticipant(tickets || []);
+  const rows = groups.map(formatGroupSheetRow);
   const payload = {
     action: 'syncAll',
     sheetName: 'CAIPSD_Tickets',
@@ -176,7 +237,7 @@ async function syncAllTicketsToSheet(tickets) {
         body: JSON.stringify(payload),
         mode: 'no-cors'
       });
-      return { status: 'ok', message: `Synced ${rows.length} tickets to Google Sheet.` };
+      return { status: 'ok', message: `Synced ${rows.length} participants to Google Sheet.` };
     } catch (e2) {
       console.warn('Sync to sheet failed:', e2);
       return { status: 'error', message: err.message };
@@ -349,41 +410,56 @@ async function syncTicketsFromGoogleSheet() {
           if (typeof col === 'object') return String(col.v !== undefined ? col.v : (col.f !== undefined ? col.f : '')).trim();
           return String(col).trim();
         };
-        const code = getV(c[0]).replace(/^'/, '').toUpperCase();
-        if (!code || code.length < 8 || code === 'TICKET ID') return null;
-        const name = getV(c[1]) || 'Participant';
+        const rawCode = getV(c[0]).replace(/^'/, '').trim();
+        const rawName = getV(c[1]) || 'Participant';
+        if (!rawCode || rawCode.length < 8 || rawCode.toLowerCase().includes('ticket id') || rawName.toLowerCase().includes('full name')) return [];
+
+        const baseName = rawName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim() || 'Participant';
         const val2 = getV(c[2]);
         const is11 = val2.includes('@') || (c.length > 9 && !val2.includes('-') && !val2.includes('T'));
-        if (is11) {
-          return {
-            id: Date.now() + i,
-            ticket_code: code,
-            full_name: name,
-            email: val2,
-            phone: getV(c[3]),
-            issued_at: getV(c[4]) || new Date().toISOString(),
-            valid_until: getV(c[5]) || new Date(Date.now() + 3 * 86400000).toISOString(),
-            status: getV(c[6]) || 'valid',
-            entry_count: Number(getV(c[7]) || 0),
-            first_entry_at: getV(c[8]) || null,
-            last_entry_at: getV(c[9]) || null,
-            email_status: getV(c[10]) || 'not_sent'
-          };
+        const email = is11 ? val2 : '';
+        const phone = is11 ? getV(c[3]) : '';
+        const issued = (is11 ? getV(c[4]) : val2) || new Date().toISOString();
+        const valid = (is11 ? getV(c[5]) : getV(c[3])) || new Date(Date.now() + 3 * 86400000).toISOString();
+        const status = (is11 ? getV(c[6]) : getV(c[4])) || 'valid';
+        const entryCount = Number((is11 ? getV(c[7]) : getV(c[5])) || 0);
+        const firstEntry = (is11 ? getV(c[8]) : getV(c[6])) || null;
+        const lastEntry = (is11 ? getV(c[9]) : getV(c[7])) || null;
+
+        const dayMatches = Array.from(rawCode.matchAll(/Day\s*(\d+)\s*:\s*([A-Za-z0-9]{8,32})/gi));
+        if (dayMatches.length > 0) {
+          return dayMatches.map((m, dIdx) => ({
+            id: Date.now() + i * 100 + dIdx,
+            ticket_code: m[2].toUpperCase(),
+            full_name: `${baseName} (Day ${m[1]})`,
+            email,
+            phone,
+            issued_at: issued,
+            valid_until: valid,
+            status: status === 'cancelled' ? 'cancelled' : 'valid',
+            entry_count: entryCount > 0 ? 1 : 0,
+            first_entry_at: firstEntry,
+            last_entry_at: lastEntry,
+            email_status: 'not_sent',
+            max_days: 1
+          }));
         }
-        return {
+
+        return [{
           id: Date.now() + i,
-          ticket_code: code,
-          full_name: name,
-          email: '',
-          phone: '',
-          issued_at: val2 || new Date().toISOString(),
-          valid_until: getV(c[3]) || new Date(Date.now() + 3 * 86400000).toISOString(),
-          status: getV(c[4]) || 'valid',
-          entry_count: Number(getV(c[5]) || 0),
-          first_entry_at: getV(c[6]) || null,
-          last_entry_at: getV(c[7]) || null,
-          email_status: 'not_sent'
-        };
+          ticket_code: rawCode.toUpperCase(),
+          full_name: rawName,
+          email,
+          phone,
+          issued_at: issued,
+          valid_until: valid,
+          status,
+          entry_count: entryCount,
+          first_entry_at: firstEntry,
+          last_entry_at: lastEntry,
+          email_status: 'not_sent',
+          max_days: 1
+        }];
       }
 
       if (url.includes('gviz/tq')) {
@@ -392,7 +468,7 @@ async function syncTicketsFromGoogleSheet() {
         if (start !== -1 && end > start) {
           const json = JSON.parse(text.slice(start, end + 1));
           if (json.table && Array.isArray(json.table.rows)) {
-            imported = json.table.rows.map((r, i) => parseRowItem(r.c || [], i)).filter(Boolean);
+            imported = json.table.rows.flatMap((r, i) => parseRowItem(r.c || [], i) || []);
           }
         }
       } else {
@@ -401,7 +477,7 @@ async function syncTicketsFromGoogleSheet() {
           for (let i = 1; i < lines.length; i++) {
             const cols = lines[i].split(',').map((x) => x.replace(/^["']|["']$/g, '').trim());
             const parsed = parseRowItem(cols, i);
-            if (parsed) imported.push(parsed);
+            if (parsed && parsed.length) imported.push(...parsed);
           }
         }
       }
@@ -553,9 +629,9 @@ async function handleStaticApi(url, options = {}) {
 
     for (let i = createdTickets.length - 1; i >= 0; i--) {
       list.unshift(createdTickets[i]);
-      pushTicketToSheet(createdTickets[i], 'appendTicket');
     }
     saveLocalTickets(list);
+    pushTicketToSheet(createdTickets, 'appendTicket');
 
     return {
       message: `${days} ticket${days === 1 ? '' : 's'} generated for ${baseName} (${days} daily pass${days === 1 ? '' : 'es'}).`,
@@ -685,10 +761,13 @@ async function handleStaticApi(url, options = {}) {
       throw err;
     }
 
-    // Day N restriction: Day N ticket can only be used on Day N (or after)!
+    // Day N restriction: Day N ticket can only be used on Day N!
     const dayMatch = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
     const passDay = dayMatch ? parseInt(dayMatch[1], 10) : 1;
-    if (passDay > 1) {
+    let currentEventDay = 1;
+    if (body.activeDay && body.activeDay !== 'auto') {
+      currentEventDay = Math.max(1, parseInt(body.activeDay, 10) || 1);
+    } else {
       const todayStr = getLocalDateString(now);
       const issuedStr = getLocalDateString(new Date(t.issued_at));
       let earliestEntryDate = null;
@@ -699,20 +778,26 @@ async function handleStaticApi(url, options = {}) {
         }
       }
       const day1Date = earliestEntryDate || issuedStr;
-      let currentEventDay = 1;
       try {
         const d1 = new Date(day1Date + 'T00:00:00');
         const dt = new Date(todayStr + 'T00:00:00');
         const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
         currentEventDay = Math.max(1, diffDays + 1);
       } catch {}
+    }
 
-      if (currentEventDay < passDay) {
-        const err = new Error(`Day ${passDay} Ticket! Yeh ticket sirf Day ${passDay} par use ho sakta hai (Entry Denied).`);
-        err.status = 409;
-        err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay, alreadyUsed: false, maxDays };
-        throw err;
-      }
+    if (currentEventDay < passDay) {
+      const err = new Error(`Day ${passDay} Ticket! Yeh ticket sirf Day ${passDay} par use ho sakta hai (Entry Denied).`);
+      err.status = 409;
+      err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay, alreadyUsed: false, maxDays };
+      throw err;
+    }
+
+    if (dayMatch && passDay < currentEventDay) {
+      const err = new Error(`Day ${passDay} Ticket! Yeh ticket Day ${passDay} ke liye tha (Entry Denied).`);
+      err.status = 409;
+      err.data = { ticket: t, dayExpired: true, passDay, currentEventDay, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
+      throw err;
     }
 
     // 1-scan-per-calendar-day enforcement: check both local timezone and UTC date
@@ -1171,22 +1256,27 @@ let activeGroupForPrint = null;
 function groupTicketsByParticipant(tickets) {
   const groups = new Map();
   for (const t of tickets) {
+    if (!t) continue;
     const rawName = String(t.full_name || 'Participant').trim();
-    const baseName = rawName.replace(/\s*\((?:Day\s*[12]|Day1|Day2)\)$/i, '').trim();
-    const email = String(t.email || '').trim().toLowerCase();
-    const phone = String(t.phone || '').trim();
-    const key = `${baseName.toLowerCase()}::${email}::${phone}`;
+    if (rawName.toLowerCase() === 'full name' || rawName.toLowerCase() === 'ticket id' || String(t.ticket_code).toUpperCase() === 'TICKET ID') {
+      continue;
+    }
+    const baseName = rawName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+    const key = baseName.toLowerCase();
     if (!groups.has(key)) {
       groups.set(key, {
         key,
         baseName,
-        email,
-        phone,
+        email: t.email || '',
+        phone: t.phone || '',
         validUntil: t.valid_until,
         tickets: []
       });
     }
-    groups.get(key).tickets.push(t);
+    const grp = groups.get(key);
+    if (!grp.email && t.email) grp.email = t.email;
+    if (!grp.phone && t.phone) grp.phone = t.phone;
+    grp.tickets.push(t);
   }
 
   // Sort each group's tickets: Day 1 first, then Day 2, Day 3, etc.
@@ -1197,7 +1287,7 @@ function groupTicketsByParticipant(tickets) {
       const dayA = matchA ? parseInt(matchA[1], 10) : 0;
       const dayB = matchB ? parseInt(matchB[1], 10) : 0;
       if (dayA !== dayB) return dayA - dayB;
-      return a.id - b.id;
+      return (a.id || 0) - (b.id || 0);
     });
   }
 
@@ -1931,11 +2021,15 @@ async function performCheckin(ticketCode) {
     showCheckinResult('error', 'Enter a valid 16-character ticket ID or scan a ticket QR.');
     return;
   }
+  const activeDay = $('#scanner-active-day') ? $('#scanner-active-day').value : 'auto';
   const note = $('#scanner-message');
   note.textContent = 'Verifying ticket…';
   note.className = 'scanner-message';
   try {
-    const result = await api('/api/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
+    const result = await api('/api/check-in', {
+      method: 'POST',
+      body: JSON.stringify({ ticketCode: cleaned, activeDay })
+    });
     const dayMatch = ((result.ticket && result.ticket.full_name) || '').match(/\(Day\s*(\d+)\)/i);
     const visitInfo = dayMatch ? `Day ${dayMatch[1]} Pass · Entry Recorded` : 'Entry Recorded';
     showCheckinResult('success', result.message, result.ticket, visitInfo);
@@ -1969,7 +2063,7 @@ async function performCheckin(ticketCode) {
 
     showCheckinResult((isDayEarly || isAlreadyUsed) ? 'warning' : 'error', displayHeadline, error.data && error.data.ticket, badgeText);
     note.textContent = noteText;
-    note.className = (isDay2Early || isAlreadyUsed) ? 'scanner-message warning' : 'scanner-message error';
+    note.className = (isDayEarly || isAlreadyUsed) ? 'scanner-message warning' : 'scanner-message error';
   }
 }
 $('#manual-checkin-form').addEventListener('submit', async (event) => {

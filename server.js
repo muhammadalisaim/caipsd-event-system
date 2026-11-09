@@ -386,10 +386,8 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
       }
     }
 
-    // Auto-sync tickets to Google Sheet in background
-    for (const t of createdTickets) {
-      sheetsAppendTicket(serializeTicket(t)).catch((err) => console.error(`Sheet append error (${t.full_name}):`, err.message));
-    }
+    // Auto-sync tickets to Google Sheet in background (1 row per participant)
+    sheetsAppendTicket(createdTickets.map(serializeTicket)).catch((err) => console.error(`Sheet append error (${baseName}):`, err.message));
 
     const ticket1 = createdTickets[0];
     const ticket2 = createdTickets[1];
@@ -566,34 +564,48 @@ async function handleCheckinRequest(req, res, next) {
       });
     }
 
-    // 2. Day N Ticket restriction: Day N ticket can only be used on Day N (or after)!
+    // 2. Day N Ticket restriction: Day N ticket can only be used on Day N!
     const dayMatch = (ticket.full_name || '').match(/\(Day\s*(\d+)\)/i);
     const passDay = dayMatch ? parseInt(dayMatch[1], 10) : 1;
-    if (passDay > 1) {
+    let currentEventDay = 1;
+    if (req.body.activeDay && req.body.activeDay !== 'auto') {
+      currentEventDay = Math.max(1, parseInt(req.body.activeDay, 10) || 1);
+    } else {
       const todayLocal = getLocalDateString(now);
       const issuedLocal = getLocalDateString(new Date(ticket.issued_at));
       const day1Date = getEventDay1Date() || issuedLocal;
 
-      let currentEventDay = 1;
       try {
         const d1 = new Date(day1Date + 'T00:00:00');
         const dt = new Date(todayLocal + 'T00:00:00');
         const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
         currentEventDay = Math.max(1, diffDays + 1);
       } catch {}
+    }
 
-      if (currentEventDay < passDay) {
-        return res.status(409).json({
-          error: `Day ${passDay} Ticket! Yeh ticket sirf Day ${passDay} par use ho sakta hai (Entry Denied).`,
-          alreadyUsed: false,
-          day2Early: passDay === 2,
-          dayEarly: true,
-          passDay,
-          currentEventDay,
-          maxDays,
-          ticket: serializeTicket(ticket)
-        });
-      }
+    if (currentEventDay < passDay) {
+      return res.status(409).json({
+        error: `Day ${passDay} Ticket! Yeh ticket sirf Day ${passDay} par use ho sakta hai (Entry Denied).`,
+        alreadyUsed: false,
+        day2Early: passDay === 2,
+        dayEarly: true,
+        passDay,
+        currentEventDay,
+        maxDays,
+        ticket: serializeTicket(ticket)
+      });
+    }
+
+    if (dayMatch && passDay < currentEventDay) {
+      return res.status(409).json({
+        error: `Day ${passDay} Ticket! Yeh ticket Day ${passDay} ke liye tha (Entry Denied).`,
+        alreadyUsed: (ticket.entry_count || 0) > 0,
+        dayExpired: true,
+        passDay,
+        currentEventDay,
+        maxDays,
+        ticket: serializeTicket(ticket)
+      });
     }
 
     // 3. 1 scan per calendar day
@@ -629,7 +641,9 @@ async function handleCheckinRequest(req, res, next) {
       db.prepare('UPDATE tickets SET entry_count = entry_count + 1, first_entry_at = COALESCE(first_entry_at, ?), last_entry_at = ? WHERE id = ?').run(scannedAt, scannedAt, ticket.id);
     })();
     const updated = serializeTicket(getTicketById(ticket.id));
-    sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
+    const baseName = (ticket.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+    const siblingTickets = db.prepare('SELECT * FROM tickets WHERE full_name LIKE ? OR full_name = ?').all(`${baseName}%`, baseName).map(serializeTicket);
+    sheetsUpdateTicket(updated, siblingTickets).catch((err) => console.error('Sheet update error:', err.message));
 
     const dayNumber = updated.entry_count;
     const dayTag = dayMatch ? `Day ${passDay}` : 'Pass';

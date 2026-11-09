@@ -82,6 +82,112 @@ function ticketToRow(t) {
   ];
 }
 
+function groupTicketsByParticipant(tickets) {
+  const groups = new Map();
+  for (const t of tickets) {
+    if (!t) continue;
+    const rawName = String(t.full_name || 'Participant').trim();
+    if (rawName.toLowerCase() === 'full name' || rawName.toLowerCase() === 'ticket id' || String(t.ticket_code).toUpperCase() === 'TICKET ID') {
+      continue;
+    }
+    const baseName = rawName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+    const key = baseName.toLowerCase();
+    if (!groups.has(key)) {
+      groups.set(key, {
+        baseName,
+        email: t.email || '',
+        phone: t.phone || '',
+        tickets: []
+      });
+    }
+    const grp = groups.get(key);
+    if (!grp.email && t.email) grp.email = t.email;
+    if (!grp.phone && t.phone) grp.phone = t.phone;
+    grp.tickets.push(t);
+  }
+
+  for (const g of groups.values()) {
+    g.tickets.sort((a, b) => {
+      const matchA = (a.full_name || '').match(/\(Day\s*(\d+)\)/i);
+      const matchB = (b.full_name || '').match(/\(Day\s*(\d+)\)/i);
+      const dayA = matchA ? parseInt(matchA[1], 10) : 0;
+      const dayB = matchB ? parseInt(matchB[1], 10) : 0;
+      if (dayA !== dayB) return dayA - dayB;
+      return (a.id || 0) - (b.id || 0);
+    });
+  }
+
+  return Array.from(groups.values());
+}
+
+function participantGroupToRow(group) {
+  const tickets = group.tickets;
+  if (!tickets || tickets.length === 0) return [];
+  if (tickets.length === 1) {
+    const t = tickets[0];
+    const code = t.ticket_code ? `'${String(t.ticket_code).replace(/^'/, '')}` : '';
+    return [
+      code,
+      group.baseName || t.full_name || '',
+      t.issued_at || '',
+      t.valid_until || '',
+      t.status || 'valid',
+      t.entry_count ?? 0,
+      t.first_entry_at || '',
+      t.last_entry_at || ''
+    ];
+  }
+
+  const codeStr = tickets.map((t, idx) => {
+    const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+    const dayLabel = m ? `Day ${m[1]}` : `Day ${idx + 1}`;
+    return `${dayLabel}: ${String(t.ticket_code).replace(/^'/, '')}`;
+  }).join(' | ');
+
+  const totalEntries = tickets.reduce((sum, t) => sum + (Number(t.entry_count) || 0), 0);
+  const totalMax = tickets.length;
+
+  const entriesBreakdown = tickets.map((t, idx) => {
+    const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+    const dayLabel = m ? `Day ${m[1]}` : `Day ${idx + 1}`;
+    return `${dayLabel}: ${Number(t.entry_count) || 0}`;
+  }).join(', ');
+  const entriesStr = `${totalEntries}/${totalMax} (${entriesBreakdown})`;
+
+  const allUsed = tickets.every((t) => (Number(t.entry_count) || 0) >= 1);
+  const anyUsed = tickets.some((t) => (Number(t.entry_count) || 0) >= 1);
+  let statusStr = 'valid';
+  if (allUsed) {
+    statusStr = `Completed (${totalEntries}/${totalMax})`;
+  } else if (anyUsed) {
+    const enteredDays = tickets
+      .filter((t) => (Number(t.entry_count) || 0) >= 1)
+      .map((t, idx) => {
+        const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+        return m ? `Day ${m[1]}` : `Day ${idx + 1}`;
+      }).join(', ');
+    statusStr = `${enteredDays} Entered`;
+  }
+
+  const validUntil = tickets[0].valid_until || '';
+  const issuedAt = tickets[0].issued_at || '';
+  const firstEntries = tickets.map(t => t.first_entry_at).filter(Boolean);
+  const lastEntries = tickets.map(t => t.last_entry_at).filter(Boolean);
+  const firstEntry = firstEntries.length ? firstEntries.sort()[0] : '';
+  const lastEntry = lastEntries.length ? lastEntries.sort().reverse()[0] : '';
+
+  return [
+    `'${codeStr}`,
+    group.baseName,
+    issuedAt,
+    validUntil,
+    statusStr,
+    entriesStr,
+    firstEntry,
+    lastEntry
+  ];
+}
+
 async function sendWebhook(action, payload = {}) {
   const config = getSheetsConfig();
   if (!config.webhookUrl) {
@@ -244,39 +350,62 @@ function parseCsv(text) {
   return tickets;
 }
 
-async function appendTicket(ticket) {
+async function appendTicket(ticketOrTickets) {
   const config = getSheetsConfig();
   if (!config.webhookUrl || !config.autoSync) return;
 
   try {
-    await sendWebhook('appendTicket', {
-      ticket: {
-        id: ticket.id,
-        ticket_code: ticket.ticket_code,
-        full_name: ticket.full_name,
-        email: ticket.email,
-        phone: ticket.phone,
-        issued_at: ticket.issued_at,
-        valid_until: ticket.valid_until,
-        status: ticket.status || 'valid',
-        entry_count: ticket.entry_count || 0,
-        email_status: ticket.email_status || 'not_sent'
-      },
-      row: ticketToRow(ticket),
-      headers: SHEET_HEADERS
-    });
+    const list = Array.isArray(ticketOrTickets) ? ticketOrTickets : [ticketOrTickets];
+    if (list.length === 0) return;
+    const groups = groupTicketsByParticipant(list);
+    for (const g of groups) {
+      const rep = g.tickets[0];
+      const row = participantGroupToRow(g);
+      await sendWebhook('appendTicket', {
+        fullName: g.baseName,
+        ticketCode: rep.ticket_code,
+        ticket: {
+          id: rep.id,
+          ticket_code: rep.ticket_code,
+          full_name: g.baseName,
+          email: g.email || rep.email,
+          phone: g.phone || rep.phone,
+          issued_at: rep.issued_at,
+          valid_until: rep.valid_until,
+          status: rep.status || 'valid',
+          entry_count: rep.entry_count || 0,
+          email_status: rep.email_status || 'not_sent'
+        },
+        row,
+        headers: SHEET_HEADERS
+      });
+    }
   } catch (error) {
     console.error('Google Sheets auto-sync failed (appendTicket):', error.message);
   }
 }
 
-async function updateTicket(ticket) {
+async function updateTicket(ticket, allParticipantTickets = null) {
   const config = getSheetsConfig();
   if (!config.webhookUrl || !config.autoSync) return;
 
   try {
+    let row;
+    let baseName = ticket.full_name;
+    if (Array.isArray(allParticipantTickets) && allParticipantTickets.length > 0) {
+      const groups = groupTicketsByParticipant(allParticipantTickets);
+      if (groups.length > 0) {
+        row = participantGroupToRow(groups[0]);
+        baseName = groups[0].baseName;
+      }
+    }
+    if (!row) {
+      row = ticketToRow(ticket);
+    }
+
     await sendWebhook('updateTicket', {
       ticketCode: ticket.ticket_code,
+      fullName: baseName,
       ticket: {
         id: ticket.id,
         ticket_code: ticket.ticket_code,
@@ -291,7 +420,7 @@ async function updateTicket(ticket) {
         last_entry_at: ticket.last_entry_at,
         email_status: ticket.email_status
       },
-      row: ticketToRow(ticket)
+      row
     });
   } catch (error) {
     console.error('Google Sheets auto-sync failed (updateTicket):', error.message);
@@ -334,7 +463,8 @@ async function syncAllTickets(tickets) {
     throw new Error('To push tickets to Google Sheet, please deploy the Web App script and paste its URL.');
   }
 
-  const rows = tickets.map(ticketToRow);
+  const groups = groupTicketsByParticipant(tickets);
+  const rows = groups.map(participantGroupToRow);
   const result = await sendWebhook('syncAll', {
     headers: SHEET_HEADERS,
     rows
@@ -398,5 +528,7 @@ module.exports = {
   fetchTicketsFromSheet,
   sendTicketEmailViaSheet,
   sendTestEmailViaSheet,
-  getAppsScriptTemplate
+  getAppsScriptTemplate,
+  groupTicketsByParticipant,
+  participantGroupToRow
 };

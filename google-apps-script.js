@@ -251,6 +251,9 @@ function doPost(e) {
       if (row && row.length) {
         var code = String(row[0] || '').replace(/^'/, '').trim().toUpperCase();
         var existingRowIndex = findRowByTicketCode(sheet, code);
+        if (existingRowIndex <= 0 && (payload.fullName || (payload.ticket && payload.ticket.full_name))) {
+          existingRowIndex = findRowByParticipantName(sheet, payload.fullName || payload.ticket.full_name);
+        }
         var cols = Math.min(row.length, sheet.getLastColumn());
         if (existingRowIndex > 0) {
           sheet.getRange(existingRowIndex, 1, 1, cols).setValues([row.slice(0, cols)]);
@@ -269,6 +272,9 @@ function doPost(e) {
       }
       if (ticketCode && updatedRow) {
         var rowIndex = findRowByTicketCode(sheet, ticketCode);
+        if (rowIndex <= 0 && (payload.fullName || (payload.ticket && payload.ticket.full_name))) {
+          rowIndex = findRowByParticipantName(sheet, payload.fullName || payload.ticket.full_name);
+        }
         var cols = Math.min(updatedRow.length, sheet.getLastColumn());
         if (rowIndex > 0) {
           var existingData = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -550,9 +556,25 @@ function findRowByTicketCode(sheet, code) {
   var lastRow = sheet.getLastRow();
   if (lastRow <= 1) return -1;
   var codes = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  var search = String(code).trim().toUpperCase();
+  var search = String(code).replace(/^'/, '').trim().toUpperCase();
   for (var i = 0; i < codes.length; i++) {
-    if (String(codes[i][0]).trim().toUpperCase() === search) {
+    var cellVal = String(codes[i][0]).replace(/^'/, '').trim().toUpperCase();
+    if (cellVal === search || cellVal.indexOf(search) !== -1) {
+      return i + 2;
+    }
+  }
+  return -1;
+}
+
+function findRowByParticipantName(sheet, name) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return -1;
+  var names = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+  var search = String(name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toUpperCase();
+  if (!search) return -1;
+  for (var i = 0; i < names.length; i++) {
+    var cellName = String(names[i][0] || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toUpperCase();
+    if (cellName === search) {
       return i + 2;
     }
   }
