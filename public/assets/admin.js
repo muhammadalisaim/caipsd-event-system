@@ -1445,7 +1445,8 @@ function ticketsTable(rows, withActions, groupStorage = null) {
     } else {
       codeHtml = `<strong>${escapeHtml(g.tickets[0].ticket_code)}</strong>`;
     }
-    const actionsHtml = withActions ? `<td><div class="row-actions"><button type="button" class="status-action open-passes-modal" data-index="${idx}" data-key="${escapeHtml(g.key)}">View / Print</button><button type="button" class="status-action danger cancel-group" data-index="${idx}" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
+    const firstCode = (g.tickets && g.tickets[0]) ? g.tickets[0].ticket_code : '';
+    const actionsHtml = withActions ? `<td><div class="row-actions"><a class="status-action open-ticket-page" href="ticket.html?code=${encodeURIComponent(firstCode)}" target="_blank" rel="noopener">View / Print</a><button type="button" class="status-action danger cancel-group" data-index="${idx}" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
     return `<tr class="participant-row" data-index="${idx}" data-key="${escapeHtml(g.key)}" style="cursor:pointer;" title="Click to view passes"><td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${escapeHtml(dateTimeLabel(g.validUntil))}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
   }).join('');
   return `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
@@ -1453,12 +1454,9 @@ function ticketsTable(rows, withActions, groupStorage = null) {
 
 function bindTicketsTableEvents(container, groups) {
   if (!container || !groups) return;
-  container.querySelectorAll('.open-passes-modal').forEach((button) => {
-    button.addEventListener('click', (e) => {
+  container.querySelectorAll('.open-ticket-page').forEach((link) => {
+    link.addEventListener('click', (e) => {
       e.stopPropagation();
-      const idx = Number(button.dataset.index);
-      const group = groups[idx] || (currentGroupedMap ? currentGroupedMap.get(button.dataset.key) : null);
-      if (group) openPassesModal(group);
     });
   });
 
@@ -1467,7 +1465,9 @@ function bindTicketsTableEvents(container, groups) {
       if (e.target.closest('button, a')) return;
       const idx = Number(row.dataset.index);
       const group = groups[idx] || (currentGroupedMap ? currentGroupedMap.get(row.dataset.key) : null);
-      if (group) openPassesModal(group);
+      if (group && group.tickets && group.tickets[0]) {
+        window.open(`ticket.html?code=${encodeURIComponent(group.tickets[0].ticket_code)}`, '_blank');
+      }
     });
   });
 

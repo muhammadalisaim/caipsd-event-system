@@ -265,7 +265,26 @@ app.get('/api/ticket/:code', ticketLimiter, async (req, res) => {
   if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
   try {
     const qrDataUrl = await QRCode.toDataURL(code, qrOptions(240));
-    res.json({ ticket: { ...publicTicket(ticket), qrDataUrl } });
+    const baseName = ticket.full_name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+    const issuedMin = (ticket.issued_at || '').slice(0, 16);
+
+    const siblings = db.prepare(`
+      SELECT * FROM tickets
+      WHERE (full_name = ? OR full_name LIKE ?)
+      AND substr(issued_at, 1, 16) = ?
+      ORDER BY full_name ASC, id ASC
+    `).all(baseName, `${baseName} (%`, issuedMin);
+
+    const list = siblings.length > 0 ? siblings : [ticket];
+    const ticketsWithQr = await Promise.all(list.map(async (t) => {
+      const qr = t.ticket_code === code ? qrDataUrl : await QRCode.toDataURL(t.ticket_code, qrOptions(240));
+      return { ...publicTicket(t), qrDataUrl: qr };
+    }));
+
+    res.json({
+      ticket: { ...publicTicket(ticket), qrDataUrl },
+      tickets: ticketsWithQr
+    });
   } catch (error) {
     console.error('QR generation error:', error);
     res.status(500).json({ error: 'Ticket could not be loaded.' });

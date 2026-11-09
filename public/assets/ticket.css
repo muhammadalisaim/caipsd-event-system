@@ -59,6 +59,7 @@ a{color:inherit}
 .ticket-state.error{color:var(--red);border-color:#F0C5C0;background:#FFF8F7}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #E6DDC6;border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:10px}
 @keyframes spin{to{transform:rotate(360deg)}}
+.tickets-container{display:flex;flex-direction:column;gap:32px}
 .ticket-card[hidden],.ticket-actions[hidden]{display:none}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 
@@ -75,6 +76,8 @@ a{color:inherit}
   body{background:#fff}
   .ticket-header,.success-heading,.ticket-actions,.ticket-help,.copy-note{display:none!important}
   .ticket-page{width:100%;margin:0}
-  .ticket-card{box-shadow:none;border:1px solid #ccd3dc;break-inside:avoid}
+  .tickets-container{gap:0}
+  .ticket-card{box-shadow:none;border:1px solid #ccd3dc;break-inside:avoid;margin-bottom:28px;page-break-after:always}
+  .ticket-card:last-child{page-break-after:auto;margin-bottom:0}
   .ticket-qr-side{background:#fff}
 }

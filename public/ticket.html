@@ -14,22 +14,9 @@
 <body>
   <header class="ticket-header"><a class="brand" href="/admin.html"><img src="/assets/caipsd-logo.png" alt="CAIPSD" class="ticket-header-logo" /></a></header>
   <main class="ticket-page">
-    <div class="success-heading"><span class="success-icon">✓</span><div><div class="ticket-kicker">CAIPSD EVENT TICKET</div><h1>Ready for <em>entry.</em></h1><p>Show this QR code at the entrance. It can be scanned any time while the ticket is valid.</p></div></div>
+    <div class="success-heading"><span class="success-icon">✓</span><div><div class="ticket-kicker" id="ticket-kicker">CAIPSD EVENT TICKET</div><h1 id="ticket-headline">Ready for <em>entry.</em></h1><p id="ticket-subcopy">Show this QR code at the entrance. It can be scanned any time while the ticket is valid.</p></div></div>
     <div id="ticket-state" class="ticket-state"><span class="spinner"></span> Preparing your digital ticket…</div>
-    <section id="ticket-card" class="ticket-card" hidden>
-      <div class="ticket-main">
-        <div class="ticket-brandline"><img src="/assets/caipsd-mark.png" alt="CAIPSD" class="ticket-mini-logo" /><span>CAIPSD <small>THE ISLAMIA UNIVERSITY OF BAHAWALPUR</small></span><span class="ticket-label">ADMISSION PASS</span></div>
-        <div class="ticket-workshop-label">EVENT PASS</div>
-        <h2 id="ticket-workshop-title">CAIPSD Event Ticket</h2>
-        <div class="ticket-details">
-          <div><span>ATTENDEE</span><strong id="ticket-name"></strong></div>
-          <div><span>VALID UNTIL</span><strong id="ticket-date"></strong><small id="ticket-time"></small></div>
-          <div><span>ENTRY</span><strong id="ticket-venue"></strong></div>
-        </div>
-        <div class="ticket-bottom"><div><span>TICKET ID</span><strong id="ticket-code"></strong></div><div class="ticket-status"><span class="status-dot"></span> CONFIRMED</div></div>
-      </div>
-      <div class="ticket-qr-side"><div class="qr-frame"><img id="ticket-qr" alt="Ticket QR code" /></div><strong>Show this QR code</strong><p>Present it at the entrance for quick check-in.</p><span class="qr-divider"></span><span class="qr-serial" id="ticket-serial"></span></div>
-    </section>
+    <div id="tickets-container" class="tickets-container"></div>
     <div id="ticket-actions" class="ticket-actions" hidden><button class="button button-dark" id="print-ticket">Print / Save as PDF <span>↗</span></button><button class="button button-ghost" id="copy-link" type="button">Copy ticket link</button><div class="copy-note" id="copy-note" role="status"></div></div>
     <div class="ticket-help">Need help with your ticket? Please contact the CAIPSD event organisers.</div>
   </main>
