@@ -160,7 +160,7 @@ async function loadTicket() {
                 const issued = is11 ? getV(c[4]) : val2;
                 const valid = is11 ? getV(c[5]) : getV(c[3]);
                 const status = (is11 ? getV(c[6]) : getV(c[4])) || 'valid';
-                const entryCount = Number((is11 ? getV(c[7]) : getV(c[5])) || 0);
+                const rawEntriesStr = String((is11 ? getV(c[7]) : getV(c[5])) || '').trim();
 
                 const dayMatches = Array.from(rawCodeStr.matchAll(/Day\s*(\d+)\s*:\s*([A-Za-z0-9]{8,32})/gi));
                 if (dayMatches.length > 0) {
@@ -169,22 +169,37 @@ async function loadTicket() {
                     const d = parseInt(m[1], 10);
                     if (!seenDays.has(d)) seenDays.set(d, m[2].toUpperCase());
                   }
-                  ticketsList = Array.from(seenDays.entries()).map(([dayNum, passCode]) => ({
-                    full_name: `${basePerson} (Day ${dayNum})`,
-                    ticket_code: passCode,
-                    issued_at: issued,
-                    valid_until: valid,
-                    status: status === 'cancelled' ? 'cancelled' : 'valid',
-                    entry_count: entryCount > 0 ? 1 : 0
-                  }));
+                  ticketsList = Array.from(seenDays.entries()).map(([dayNum, passCode]) => {
+                    const dayEntryMatch = rawEntriesStr.match(new RegExp(`Day\\s*${dayNum}\\s*:\\s*(\\d+)`, 'i'));
+                    let dayEntries = 0;
+                    if (dayEntryMatch) {
+                      dayEntries = parseInt(dayEntryMatch[1], 10) || 0;
+                    } else if (String(status).toLowerCase().includes(`day ${dayNum} entered`) || String(status).toLowerCase().includes(`day${dayNum} entered`) || String(status).toLowerCase().includes('completed')) {
+                      dayEntries = 1;
+                    } else {
+                      const firstIntMatch = rawEntriesStr.match(/^(\d+)/);
+                      if (firstIntMatch && dayNum === 1 && parseInt(firstIntMatch[1], 10) > 0) {
+                        dayEntries = 1;
+                      }
+                    }
+                    return {
+                      full_name: `${basePerson} (Day ${dayNum})`,
+                      ticket_code: passCode,
+                      issued_at: issued,
+                      valid_until: valid,
+                      status: status === 'cancelled' ? 'cancelled' : (dayEntries >= 1 ? 'checked_in' : 'valid'),
+                      entry_count: dayEntries
+                    };
+                  });
                 } else {
+                  const singleEntryCount = parseInt(rawEntriesStr.replace(/^[^\d]*/, ''), 10) || (String(status).toLowerCase().includes('entered') ? 1 : 0);
                   ticketsList = [{
                     full_name: rawPerson,
                     ticket_code: rawCodeStr.toUpperCase(),
                     issued_at: issued,
                     valid_until: valid,
-                    status,
-                    entry_count: entryCount
+                    status: status === 'cancelled' ? 'cancelled' : (singleEntryCount >= 1 ? 'checked_in' : status),
+                    entry_count: singleEntryCount
                   }];
                 }
               }

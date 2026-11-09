@@ -264,12 +264,14 @@ function pushTicketToSheet(ticketOrTickets, type = 'appendTicket') {
   const groups = groupTicketsByParticipant(tickets);
   const group = groups[0] || { baseName: rawName, tickets };
   const row = formatGroupSheetRow(group);
+  const fullCodeStr = row && row[0] ? String(row[0]).replace(/^'/, '').trim() : '';
 
   const payload = {
     action: type === 'append' ? 'appendTicket' : (type === 'update' ? 'updateTicket' : type),
     sheetName: 'CAIPSD_Tickets',
     fullName: group.baseName,
-    ticketCode: rawFirst.ticket_code,
+    ticketCode: fullCodeStr || rawFirst.ticket_code,
+    singleCode: rawFirst.ticket_code,
     ticket: rawFirst,
     row: row
   };
@@ -285,15 +287,7 @@ function pushTicketToSheet(ticketOrTickets, type = 'appendTicket') {
     } catch {
       return { status: 'ok' };
     }
-  }).catch(async () => {
-    try {
-      await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload),
-        mode: 'no-cors'
-      });
-    } catch {}
+  }).catch(() => {
     return { status: 'ok' };
   });
 }
@@ -509,7 +503,7 @@ async function syncTicketsFromGoogleSheet() {
         const issued = (is11 ? getV(c[4]) : val2) || new Date().toISOString();
         const valid = (is11 ? getV(c[5]) : getV(c[3])) || new Date(Date.now() + 3 * 86400000).toISOString();
         const status = (is11 ? getV(c[6]) : getV(c[4])) || 'valid';
-        const entryCount = Number((is11 ? getV(c[7]) : getV(c[5])) || 0);
+        const rawEntriesStr = String((is11 ? getV(c[7]) : getV(c[5])) || '').trim();
         const firstEntry = (is11 ? getV(c[8]) : getV(c[6])) || null;
         const lastEntry = (is11 ? getV(c[9]) : getV(c[7])) || null;
 
@@ -522,23 +516,40 @@ async function syncTicketsFromGoogleSheet() {
               seenDays.set(d, m[2].toUpperCase());
             }
           }
-          return Array.from(seenDays.entries()).map(([dayNum, code], dIdx) => ({
-            id: Date.now() + i * 100 + dIdx,
-            ticket_code: code,
-            full_name: `${baseName} (Day ${dayNum})`,
-            email,
-            phone,
-            issued_at: issued,
-            valid_until: valid,
-            status: status === 'cancelled' ? 'cancelled' : 'valid',
-            entry_count: entryCount > 0 ? 1 : 0,
-            first_entry_at: firstEntry,
-            last_entry_at: lastEntry,
-            email_status: 'not_sent',
-            max_days: 1
-          }));
+          return Array.from(seenDays.entries()).map(([dayNum, code], dIdx) => {
+            const dayEntryMatch = rawEntriesStr.match(new RegExp(`Day\\s*${dayNum}\\s*:\\s*(\\d+)`, 'i'));
+            let dayEntries = 0;
+            if (dayEntryMatch) {
+              dayEntries = parseInt(dayEntryMatch[1], 10) || 0;
+            } else if (String(status).toLowerCase().includes(`day ${dayNum} entered`) || String(status).toLowerCase().includes(`day${dayNum} entered`)) {
+              dayEntries = 1;
+            } else if (String(status).toLowerCase().includes('completed')) {
+              dayEntries = 1;
+            } else {
+              const firstIntMatch = rawEntriesStr.match(/^(\d+)/);
+              if (firstIntMatch && dayNum === 1 && parseInt(firstIntMatch[1], 10) > 0) {
+                dayEntries = 1;
+              }
+            }
+            return {
+              id: Date.now() + i * 100 + dIdx,
+              ticket_code: code,
+              full_name: `${baseName} (Day ${dayNum})`,
+              email,
+              phone,
+              issued_at: issued,
+              valid_until: valid,
+              status: status === 'cancelled' ? 'cancelled' : (dayEntries >= 1 ? 'checked_in' : 'valid'),
+              entry_count: dayEntries,
+              first_entry_at: dayEntries >= 1 ? (firstEntry || issued) : null,
+              last_entry_at: dayEntries >= 1 ? (lastEntry || firstEntry || issued) : null,
+              email_status: 'not_sent',
+              max_days: 1
+            };
+          });
         }
 
+        const singleEntryCount = parseInt(rawEntriesStr.replace(/^[^\d]*/, ''), 10) || (String(status).toLowerCase().includes('entered') || String(status).toLowerCase().includes('checked_in') ? 1 : 0);
         return [{
           id: Date.now() + i,
           ticket_code: rawCode.toUpperCase(),
@@ -547,10 +558,10 @@ async function syncTicketsFromGoogleSheet() {
           phone,
           issued_at: issued,
           valid_until: valid,
-          status,
-          entry_count: entryCount,
-          first_entry_at: firstEntry,
-          last_entry_at: lastEntry,
+          status: status === 'cancelled' ? 'cancelled' : (singleEntryCount >= 1 ? 'checked_in' : status),
+          entry_count: singleEntryCount,
+          first_entry_at: singleEntryCount >= 1 ? (firstEntry || issued) : null,
+          last_entry_at: singleEntryCount >= 1 ? (lastEntry || firstEntry || issued) : null,
           email_status: 'not_sent',
           max_days: 1
         }];
@@ -578,17 +589,33 @@ async function syncTicketsFromGoogleSheet() {
 
       if (imported.length > 0) {
         const map = new Map();
-        const importedPersons = new Set();
-        imported.forEach((t) => {
-          map.set(t.ticket_code.toUpperCase(), t);
-          const base = String(t.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
-          if (base) importedPersons.add(base);
-        });
         const list = getLocalTickets();
+        const localMap = new Map();
         list.forEach((t) => {
+          if (t.ticket_code) localMap.set(t.ticket_code.toUpperCase(), t);
+        });
+
+        imported.forEach((t) => {
           const k = t.ticket_code.toUpperCase();
-          const base = String(t.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
-          if (!map.has(k) && !importedPersons.has(base)) {
+          const existing = localMap.get(k);
+          if (existing) {
+            // NEVER downgrade entry count if local already recorded a checkin!
+            const mergedEntries = Math.max(existing.entry_count || 0, t.entry_count || 0);
+            t.entry_count = mergedEntries;
+            t.status = mergedEntries >= 1 ? 'checked_in' : (existing.status || t.status);
+            t.first_entry_at = existing.first_entry_at || t.first_entry_at;
+            t.last_entry_at = existing.last_entry_at || t.last_entry_at;
+            if (Array.isArray(existing.entry_dates)) {
+              t.entry_dates = Array.from(new Set([...(existing.entry_dates || []), ...(t.entry_dates || [])]));
+            }
+          }
+          map.set(k, t);
+        });
+
+        // Preserve any local tickets that were not in Google Sheet
+        list.forEach((t) => {
+          const k = (t.ticket_code || '').toUpperCase();
+          if (k && !map.has(k)) {
             map.set(k, t);
           }
         });
@@ -879,7 +906,7 @@ async function handleStaticApi(url, options = {}) {
 
     const maxDays = Number(t.max_days) || 1;
     if ((t.entry_count || 0) >= maxDays) {
-      const err = new Error('Already used ticket! Yeh ticket pehle hi use ho chuka hai (Entry Denied).');
+      const err = new Error('Already used ticket! Yeh ticket 1 bar use ho chuki hai (Entry Denied).');
       err.status = 409;
       err.data = { ticket: t, limitReached: true, alreadyUsed: true, maxDays };
       throw err;
@@ -942,7 +969,7 @@ async function handleStaticApi(url, options = {}) {
     );
 
     if (alreadyUsedToday) {
-      const err = new Error('Already used ticket! Yeh ticket aaj pehle hi use ho chuka hai (Entry Denied).');
+      const err = new Error('Already used ticket! Yeh ticket 1 bar use ho chuki hai (Entry Denied).');
       err.status = 409;
       err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
       throw err;
@@ -2222,12 +2249,15 @@ function showCheckinResult(type, message, ticket = null, extra = '') {
       ${detailHtml}
     </div>`;
 }
+let isCheckinInProgress = false;
 async function performCheckin(ticketCode) {
+  if (isCheckinInProgress) return;
   const cleaned = extractTicketCode(ticketCode);
   if (!cleaned) {
     showCheckinResult('error', 'Enter a valid 16-character ticket ID or scan a ticket QR.');
     return;
   }
+  isCheckinInProgress = true;
   const activeDay = $('#scanner-active-day') ? $('#scanner-active-day').value : 'auto';
   const note = $('#scanner-message');
   note.textContent = 'Verifying ticket…';
@@ -2252,7 +2282,7 @@ async function performCheckin(ticketCode) {
     const earlyDayNum = (error.data && error.data.passDay) || ((error.message || '').match(/Day\s*(\d+)/i)?.[1]) || '2';
     const isAlreadyUsed = !isDayEarly && Boolean(
       (error.data && (error.data.alreadyUsed || error.data.alreadyScannedToday || error.data.limitReached)) ||
-      (error.message && (error.message.includes('already used') || error.message.includes('Already used') || error.message.includes('pehle hi use') || error.message.includes('limit reached')))
+      (error.message && (error.message.includes('already used') || error.message.includes('Already used') || error.message.includes('use ho chuk') || error.message.includes('pehle hi use') || error.message.includes('limit reached')))
     );
     let displayHeadline;
     let badgeText;
@@ -2265,7 +2295,7 @@ async function performCheckin(ticketCode) {
     } else if (isAlreadyUsed) {
       displayHeadline = 'Already used ticket! (Entry Denied)';
       badgeText = 'ALREADY USED TICKET · ENTRY DENIED';
-      toast('⚠ Already used ticket! Yeh ticket pehle hi use ho chuka hai (Entry Denied).', 'error');
+      toast('⚠ Already used ticket! Yeh ticket 1 bar use ho chuki hai (Entry Denied).', 'error');
     } else {
       displayHeadline = error.message;
       badgeText = '';
@@ -2275,6 +2305,8 @@ async function performCheckin(ticketCode) {
     showCheckinResult((isDayEarly || isAlreadyUsed) ? 'warning' : 'error', displayHeadline, error.data && error.data.ticket, badgeText);
     note.textContent = noteText;
     note.className = (isDayEarly || isAlreadyUsed) ? 'scanner-message warning' : 'scanner-message error';
+  } finally {
+    isCheckinInProgress = false;
   }
 }
 $('#manual-checkin-form').addEventListener('submit', async (event) => {
@@ -2292,6 +2324,7 @@ async function startScanner() {
     if (!html5Scanner) html5Scanner = new Html5Qrcode('reader');
     $('#start-scanner').disabled = true; $('#scanner-message').textContent = 'Requesting camera access…';
     await html5Scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 210, height: 210 }, aspectRatio: 1 }, async (decodedText) => {
+      if (isCheckinInProgress) return;
       $('#scanner-message').textContent = 'Ticket detected. Verifying…';
       await stopScanner();
       await performCheckin(decodedText);

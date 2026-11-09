@@ -420,9 +420,11 @@ async function updateTicket(ticket, allParticipantTickets = null) {
     if (!row) {
       row = ticketToRow(ticket);
     }
+    const fullCodeStr = row && row[0] ? String(row[0]).replace(/^'/, '').trim() : '';
 
     await sendWebhook('updateTicket', {
-      ticketCode: ticket.ticket_code,
+      ticketCode: fullCodeStr || ticket.ticket_code,
+      singleCode: ticket.ticket_code,
       fullName: baseName,
       ticket: {
         id: ticket.id,

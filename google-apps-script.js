@@ -265,13 +265,16 @@ function doPost(e) {
     }
 
     if (action === 'updateTicket' || action === 'update') {
-      var ticketCode = payload.ticketCode || (payload.ticket && payload.ticket.ticket_code);
+      var ticketCode = payload.ticketCode || payload.singleCode || (payload.ticket && payload.ticket.ticket_code);
       var updatedRow = payload.row;
       if (!updatedRow && payload.ticket) {
         updatedRow = buildRowForTicket(sheet, payload.ticket);
       }
       if (ticketCode && updatedRow) {
         var rowIndex = findRowByTicketCode(sheet, ticketCode);
+        if (rowIndex <= 0 && payload.singleCode) {
+          rowIndex = findRowByTicketCode(sheet, payload.singleCode);
+        }
         if (rowIndex <= 0 && (payload.fullName || (payload.ticket && payload.ticket.full_name))) {
           rowIndex = findRowByParticipantName(sheet, payload.fullName || payload.ticket.full_name);
         }
@@ -320,8 +323,15 @@ function doPost(e) {
           sheet.getRange(rowIndex, 1, 1, cols).setValues([updatedRow.slice(0, cols)]);
           return respondJson({ status: 'ok', message: 'Row updated.' });
         } else {
-          sheet.appendRow(updatedRow.slice(0, cols));
-          return respondJson({ status: 'ok', message: 'Row appended.' });
+          var nameSearch = payload.fullName || (payload.ticket && payload.ticket.full_name);
+          if (nameSearch) {
+            var retryIdx = findRowByParticipantName(sheet, nameSearch);
+            if (retryIdx > 0) {
+              sheet.getRange(retryIdx, 1, 1, cols).setValues([updatedRow.slice(0, cols)]);
+              return respondJson({ status: 'ok', message: 'Row updated.' });
+            }
+          }
+          return respondJson({ status: 'not_found', message: 'Ticket row not found to update.' });
         }
       }
       return respondJson({ status: 'error', message: 'Missing ticketCode or row data' });
@@ -556,11 +566,22 @@ function findRowByTicketCode(sheet, code) {
   var lastRow = sheet.getLastRow();
   if (lastRow <= 1) return -1;
   var codes = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  var search = String(code).replace(/^'/, '').trim().toUpperCase();
+  var search = String(code || '').replace(/^'/, '').trim().toUpperCase();
+  if (!search) return -1;
+
+  var hexMatches = search.match(/[A-Z0-9]{8,32}/g) || [];
+
   for (var i = 0; i < codes.length; i++) {
-    var cellVal = String(codes[i][0]).replace(/^'/, '').trim().toUpperCase();
-    if (cellVal === search || cellVal.indexOf(search) !== -1) {
+    var cellVal = String(codes[i][0] || '').replace(/^'/, '').trim().toUpperCase();
+    if (!cellVal) continue;
+    if (cellVal === search || cellVal.indexOf(search) !== -1 || search.indexOf(cellVal) !== -1) {
       return i + 2;
+    }
+    for (var m = 0; m < hexMatches.length; m++) {
+      var tok = hexMatches[m];
+      if (tok.length >= 8 && cellVal.indexOf(tok) !== -1) {
+        return i + 2;
+      }
     }
   }
   return -1;
@@ -574,11 +595,47 @@ function findRowByParticipantName(sheet, name) {
   if (!search) return -1;
   for (var i = 0; i < names.length; i++) {
     var cellName = String(names[i][0] || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toUpperCase();
-    if (cellName === search) {
+    if (cellName === search || cellName.indexOf(search) !== -1 || search.indexOf(cellName) !== -1) {
       return i + 2;
     }
   }
   return -1;
+}
+
+function cleanDuplicateRows(sheet) {
+  if (!sheet) {
+    var ss = getSpreadsheet();
+    sheet = ss.getSheetByName("CAIPSD_Tickets") || ss.getSheetByName("Tickets") || ss.getActiveSheet();
+  }
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 2) return 0;
+  var data = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+  var seen = {};
+  var rowsToDelete = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var name = String(row[1] || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toUpperCase();
+    if (!name) continue;
+    var rowNum = i + 2;
+    if (seen[name]) {
+      var prev = seen[name];
+      var prevEntries = parseInt(String(prev.row[5] || '0').replace(/^[^\d]*/, ''), 10) || 0;
+      var curEntries = parseInt(String(row[5] || '0').replace(/^[^\d]*/, ''), 10) || 0;
+      if (curEntries >= prevEntries) {
+        rowsToDelete.push(prev.rowNum);
+        seen[name] = { rowNum: rowNum, row: row };
+      } else {
+        rowsToDelete.push(rowNum);
+      }
+    } else {
+      seen[name] = { rowNum: rowNum, row: row };
+    }
+  }
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  for (var d = 0; d < rowsToDelete.length; d++) {
+    sheet.deleteRow(rowsToDelete[d]);
+  }
+  return rowsToDelete.length;
 }
 
 function respondJson(data) {
@@ -597,6 +654,7 @@ function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('⚡ CAIPSD Event')
     .addItem('✨ Align & Auto-Format Sheet', 'formatAndAlignSheet')
+    .addItem('🧹 Clean Duplicate Rows', 'cleanDuplicateRows')
     .addItem('🧹 Remove Blank Columns (C & D)', 'formatAndAlignSheet')
     .addItem('🏷️ Restore All Headers (Email & Phone)', 'formatWithAllColumns')
     .addToUi();
@@ -613,6 +671,7 @@ function onOpen() {
 function formatAndAlignSheet() {
   var ss = getSpreadsheet();
   var sheet = ss.getSheetByName("CAIPSD_Tickets") || ss.getSheetByName("Tickets") || ss.getActiveSheet();
+  try { cleanDuplicateRows(sheet); } catch(eDup) {}
   
   var maxCols = sheet.getMaxColumns();
   if (maxCols >= 4) {
