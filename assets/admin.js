@@ -1600,7 +1600,7 @@ function updateDatePreview(dateInput, daysSelect, previewEl) {
   const startVal = dateInput ? dateInput.value : '';
   const days = Math.max(1, parseInt(daysSelect?.value, 10) || 1);
   if (!startVal) {
-    previewEl.innerHTML = '📅 Select a start date to preview workshop schedule';
+    previewEl.innerHTML = '<span style="opacity:0.8;">📅 Select a workshop start date above</span>';
     return;
   }
   const [y, m, d] = startVal.split('-').map(Number);
@@ -1609,13 +1609,13 @@ function updateDatePreview(dateInput, daysSelect, previewEl) {
   const fmt = (date) => date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const fmtShort = (date) => date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   if (days === 1) {
-    previewEl.innerHTML = `📅 <strong>${fmt(startDate)}</strong> (1-Day Workshop Pass)`;
+    previewEl.innerHTML = `<span>📅 <strong>${fmt(startDate)}</strong> (1-Day Workshop Pass)</span>`;
   } else {
     const dayBreakdown = Array.from({ length: days }, (_, i) => {
       const dayDate = new Date(y, m - 1, d + i);
       return `Day ${i + 1}: ${fmtShort(dayDate)}`;
     }).join(' · ');
-    previewEl.innerHTML = `📅 <strong>${fmtShort(startDate)} – ${fmt(endDate)}</strong> (${days} Days)<br><span style="opacity:0.85;font-weight:500;">${dayBreakdown}</span>`;
+    previewEl.innerHTML = `<div>📅 <strong>${fmtShort(startDate)} – ${fmt(endDate)}</strong> (${days} Days)</div><div style="font-size:12px;font-weight:500;opacity:0.9;margin-top:2px;">${dayBreakdown}</div>`;
   }
 }
 

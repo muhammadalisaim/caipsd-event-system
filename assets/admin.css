@@ -287,7 +287,11 @@ h1,h2,h3{font-family:var(--display);color:var(--ink)}
 .admin-modal h2{font:600 30px var(--display);letter-spacing:-.7px;margin:10px 0 6px}
 .admin-modal h2 em{font-style:italic;color:var(--gold-text)}
 .modal-subcopy{font-size:14.5px;color:var(--muted);margin:0 0 20px}
-.admin-form-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:14px}
+.admin-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.admin-form input[type="date"]{color-scheme:light;cursor:pointer}
+.admin-form input[type="date"]::-webkit-calendar-picker-indicator{cursor:pointer;padding:4px;opacity:.85}
+.admin-form input[type="date"]::-webkit-calendar-picker-indicator:hover{opacity:1}
+.date-preview-note{font-size:13px;line-height:1.5;color:var(--gold-text);background:#FFFBF2;padding:9px 13px;border-radius:10px;border:1px solid #EEDBB3;margin:4px 0 12px;font-weight:600}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;padding-top:14px;border-top:1px solid var(--line2)}
 .toast-region{position:fixed;right:20px;bottom:20px;z-index:100;display:flex;flex-direction:column;gap:10px;max-width:min(400px,calc(100% - 40px))}
 .toast{background:var(--navy);color:#fff;padding:14px 18px;border-radius:12px;font-size:14px;line-height:1.5;box-shadow:0 14px 36px rgba(20,33,61,.3);border-left:4px solid #E3B25B;animation:fade .2s ease-out}
