@@ -91,7 +91,8 @@ function groupTicketsByParticipant(tickets) {
       continue;
     }
     const baseName = rawName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
-    const key = baseName.toLowerCase();
+    const issuedMinute = t.issued_at ? t.issued_at.slice(0, 16) : '';
+    const key = `${baseName.toLowerCase()}::${issuedMinute}`;
     if (!groups.has(key)) {
       groups.set(key, {
         baseName,
@@ -101,9 +102,17 @@ function groupTicketsByParticipant(tickets) {
       });
     }
     const grp = groups.get(key);
-    if (!grp.email && t.email) grp.email = t.email;
-    if (!grp.phone && t.phone) grp.phone = t.phone;
-    grp.tickets.push(t);
+    const match = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+    const dayNum = match ? parseInt(match[1], 10) : 0;
+    const alreadyHasDay = dayNum > 0 && grp.tickets.some((existing) => {
+      const em = (existing.full_name || '').match(/\(Day\s*(\d+)\)/i);
+      return em && parseInt(em[1], 10) === dayNum;
+    });
+    if (!alreadyHasDay) {
+      if (!grp.email && t.email) grp.email = t.email;
+      if (!grp.phone && t.phone) grp.phone = t.phone;
+      grp.tickets.push(t);
+    }
   }
 
   for (const g of groups.values()) {

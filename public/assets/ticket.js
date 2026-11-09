@@ -52,15 +52,21 @@ async function loadTicket() {
                 const matchRow = data.table.rows.find((r) => {
                   const c = r.c || [];
                   const cVal = c[0] ? String(c[0].v || c[0].f || '').replace(/^'/, '').trim().toUpperCase() : '';
-                  return cVal === code;
+                  return cVal === code || cVal.includes(code);
                 });
                 if (matchRow) {
                   const c = matchRow.c || [];
                   const getV = (col) => (col ? String(col.v !== undefined ? col.v : (col.f !== undefined ? col.f : '')).trim() : '');
+                  const rawCodeStr = getV(c[0]).replace(/^'/, '');
+                  const dayM = rawCodeStr.match(new RegExp(`Day\\s*(\\d+)\\s*:\\s*${code}`, 'i'));
+                  const rawPerson = getV(c[1]) || 'Participant';
+                  const basePerson = rawPerson.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+                  const displayName = dayM ? `${basePerson} (Day ${dayM[1]})` : rawPerson;
+
                   const val2 = getV(c[2]);
                   const is11 = val2.includes('@') || (c.length > 9 && !val2.includes('-') && !val2.includes('T'));
                   found = {
-                    full_name: getV(c[1]) || 'Participant',
+                    full_name: displayName,
                     email: is11 ? val2 : '',
                     phone: is11 ? getV(c[3]) : '',
                     issued_at: is11 ? getV(c[4]) : val2,

@@ -49,17 +49,74 @@ async function loadAppsScriptCode() {
 function getLocalTickets() {
   try {
     const raw = localStorage.getItem('caipsd_tickets');
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        const seenCodes = new Set();
+        const seenPersonDays = new Set();
+        const cleaned = [];
+        for (const t of list) {
+          if (!t || !t.ticket_code) continue;
+          const code = String(t.ticket_code).toUpperCase();
+          if (seenCodes.has(code)) continue;
+          seenCodes.add(code);
+
+          const baseName = String(t.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+          const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+          const dayNum = m ? parseInt(m[1], 10) : 0;
+          if (dayNum > 0 && baseName) {
+            const personDayKey = `${baseName}::Day${dayNum}`;
+            if (seenPersonDays.has(personDayKey)) continue;
+            seenPersonDays.add(personDayKey);
+          }
+          cleaned.push(t);
+        }
+        if (cleaned.length !== list.length) {
+          try {
+            localStorage.setItem('caipsd_tickets', JSON.stringify(cleaned));
+          } catch {}
+        }
+        return cleaned;
+      }
+    }
   } catch {}
   return [
     {
       id: 1,
-      full_name: 'Muhammad Ali Saim',
+      full_name: 'Muhammad Ali Saim (Day 1)',
       email: 'saimmalik4728@gmail.com',
       phone: '03287617476',
-      ticket_code: '186E09E35C2500A9',
-      issued_at: new Date().toISOString(),
-      valid_until: new Date(Date.now() + 3 * 86400000).toISOString(),
+      ticket_code: '720F8E1D323E64A4',
+      issued_at: '2026-11-09T14:18:21.829Z',
+      valid_until: '2026-11-12T14:18:21.829Z',
+      entry_count: 0,
+      first_entry_at: null,
+      last_entry_at: null,
+      email_status: 'sent',
+      status: 'valid'
+    },
+    {
+      id: 2,
+      full_name: 'Muhammad Ali Saim (Day 2)',
+      email: 'saimmalik4728@gmail.com',
+      phone: '03287617476',
+      ticket_code: '99151C9C3B36D4FA',
+      issued_at: '2026-11-09T14:18:21.829Z',
+      valid_until: '2026-11-12T14:18:21.829Z',
+      entry_count: 0,
+      first_entry_at: null,
+      last_entry_at: null,
+      email_status: 'sent',
+      status: 'valid'
+    },
+    {
+      id: 3,
+      full_name: 'Muhammad Ali Saim (Day 3)',
+      email: 'saimmalik4728@gmail.com',
+      phone: '03287617476',
+      ticket_code: '637990B2FD9603D1',
+      issued_at: '2026-11-09T14:18:21.829Z',
+      valid_until: '2026-11-12T14:18:21.829Z',
       entry_count: 0,
       first_entry_at: null,
       last_entry_at: null,
@@ -185,12 +242,24 @@ function pushTicketToSheet(ticketOrTickets, type = 'appendTicket') {
   const list = getLocalTickets();
   const rawFirst = tickets[0];
   const rawName = String(rawFirst.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
-  const allForPerson = list.filter((x) => {
-    const xBase = String(x.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
-    return xBase.toLowerCase() === rawName.toLowerCase();
-  });
-  if (allForPerson.length > tickets.length) {
-    tickets = allForPerson;
+  const issuedMin = rawFirst.issued_at ? String(rawFirst.issued_at).slice(0, 16) : '';
+
+  if (tickets.length === 1 && list.length > 0) {
+    const siblings = list.filter((x) => {
+      const xBase = String(x.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+      const xMin = x.issued_at ? String(x.issued_at).slice(0, 16) : '';
+      return xBase.toLowerCase() === rawName.toLowerCase() && (!issuedMin || !xMin || xMin === issuedMin);
+    });
+    const dayMap = new Map();
+    for (const sib of siblings) {
+      const m = (sib.full_name || '').match(/\(Day\s*(\d+)\)/i);
+      const d = m ? parseInt(m[1], 10) : 0;
+      if (!dayMap.has(d)) dayMap.set(d, sib);
+    }
+    const deduped = Array.from(dayMap.values());
+    if (deduped.length > 0) {
+      tickets = deduped;
+    }
   }
   const groups = groupTicketsByParticipant(tickets);
   const group = groups[0] || { baseName: rawName, tickets };
@@ -446,10 +515,17 @@ async function syncTicketsFromGoogleSheet() {
 
         const dayMatches = Array.from(rawCode.matchAll(/Day\s*(\d+)\s*:\s*([A-Za-z0-9]{8,32})/gi));
         if (dayMatches.length > 0) {
-          return dayMatches.map((m, dIdx) => ({
+          const seenDays = new Map();
+          for (const m of dayMatches) {
+            const d = parseInt(m[1], 10);
+            if (!seenDays.has(d)) {
+              seenDays.set(d, m[2].toUpperCase());
+            }
+          }
+          return Array.from(seenDays.entries()).map(([dayNum, code], dIdx) => ({
             id: Date.now() + i * 100 + dIdx,
-            ticket_code: m[2].toUpperCase(),
-            full_name: `${baseName} (Day ${m[1]})`,
+            ticket_code: code,
+            full_name: `${baseName} (Day ${dayNum})`,
             email,
             phone,
             issued_at: issued,
@@ -501,12 +577,20 @@ async function syncTicketsFromGoogleSheet() {
       }
 
       if (imported.length > 0) {
-        const list = getLocalTickets();
         const map = new Map();
-        imported.forEach((t) => map.set(t.ticket_code.toUpperCase(), t));
+        const importedPersons = new Set();
+        imported.forEach((t) => {
+          map.set(t.ticket_code.toUpperCase(), t);
+          const base = String(t.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+          if (base) importedPersons.add(base);
+        });
+        const list = getLocalTickets();
         list.forEach((t) => {
           const k = t.ticket_code.toUpperCase();
-          if (!map.has(k)) map.set(k, t);
+          const base = String(t.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+          if (!map.has(k) && !importedPersons.has(base)) {
+            map.set(k, t);
+          }
         });
         const merged = Array.from(map.values());
         saveLocalTickets(merged);
@@ -1280,7 +1364,8 @@ function groupTicketsByParticipant(tickets) {
       continue;
     }
     const baseName = rawName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
-    const key = baseName.toLowerCase();
+    const issuedMinute = t.issued_at ? String(t.issued_at).slice(0, 16) : '';
+    const key = `${baseName.toLowerCase()}::${issuedMinute}`;
     if (!groups.has(key)) {
       groups.set(key, {
         key,
@@ -1292,9 +1377,20 @@ function groupTicketsByParticipant(tickets) {
       });
     }
     const grp = groups.get(key);
-    if (!grp.email && t.email) grp.email = t.email;
-    if (!grp.phone && t.phone) grp.phone = t.phone;
-    grp.tickets.push(t);
+    const match = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+    const dayNum = match ? parseInt(match[1], 10) : 0;
+    const alreadyHasDay = dayNum > 0 && grp.tickets.some((existing) => {
+      const em = (existing.full_name || '').match(/\(Day\s*(\d+)\)/i);
+      return em && parseInt(em[1], 10) === dayNum;
+    });
+    if (!alreadyHasDay) {
+      if (!grp.email && t.email) grp.email = t.email;
+      if (!grp.phone && t.phone) grp.phone = t.phone;
+      if (!grp.validUntil || (t.valid_until && new Date(t.valid_until) > new Date(grp.validUntil))) {
+        grp.validUntil = t.valid_until;
+      }
+      grp.tickets.push(t);
+    }
   }
 
   // Sort each group's tickets: Day 1 first, then Day 2, Day 3, etc.
