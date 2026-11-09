@@ -20,14 +20,27 @@ const actions = document.getElementById('ticket-actions');
 function escapeHtml(value = '') { return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]); }
 
 function renderTicketCard(t, markSrc) {
+  const eventDateObj = t.event_date ? new Date(t.event_date + 'T00:00:00') : null;
   const until = new Date(t.valid_until);
-  const formattedDate = !isNaN(until.getTime())
-    ? until.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })
-    : 'Valid for Event';
+
+  let formattedDate;
+  let dateFieldLabel = 'VALID UNTIL';
+  if (eventDateObj && !isNaN(eventDateObj.getTime())) {
+    formattedDate = eventDateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+    dateFieldLabel = 'WORKSHOP DATE';
+  } else if (!isNaN(until.getTime())) {
+    formattedDate = until.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+  } else {
+    formattedDate = 'Valid for Event';
+  }
 
   const dayMatch = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
   const dayTag = dayMatch ? `Day ${dayMatch[1]} Pass` : 'Admission Pass';
-  const entryText = dayMatch ? `Day ${dayMatch[1]} Pass · Single Entry` : 'Admit one · Single Entry';
+  let dateSuffix = '';
+  if (eventDateObj && !isNaN(eventDateObj.getTime())) {
+    dateSuffix = ` (${eventDateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })})`;
+  }
+  const entryText = dayMatch ? `Day ${dayMatch[1]} Pass · Single Entry${dateSuffix}` : 'Admit one · Single Entry';
 
   let statusClass = '';
   let statusText = 'VALID';
@@ -52,7 +65,7 @@ function renderTicketCard(t, markSrc) {
         <h2>CAIPSD Event Ticket</h2>
         <div class="ticket-details">
           <div><span>ATTENDEE</span><strong>${escapeHtml(t.full_name)}</strong></div>
-          <div><span>VALID UNTIL</span><strong>${escapeHtml(formattedDate)}</strong></div>
+          <div><span>${dateFieldLabel}</span><strong>${escapeHtml(formattedDate)}</strong></div>
           <div><span>ENTRY</span><strong>${escapeHtml(entryText)}</strong></div>
         </div>
         <div class="ticket-bottom">

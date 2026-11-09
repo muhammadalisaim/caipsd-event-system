@@ -382,15 +382,25 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
 
     const baseName = rawFullName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
     const issued = new Date();
-    const validUntil = new Date(issued.getTime() + Math.max(days, 2) * 24 * 60 * 60 * 1000);
+    const rawStartDate = cleanText(req.body.startDate || req.body.eventDate, 20);
+    let eventStart;
+    if (rawStartDate && /^\d{4}-\d{2}-\d{2}$/.test(rawStartDate)) {
+      eventStart = new Date(rawStartDate + 'T00:00:00');
+    } else {
+      eventStart = new Date(getLocalDateString(issued) + 'T00:00:00');
+    }
+    const endDayMs = eventStart.getTime() + (days - 1) * 86400000;
+    const validUntil = new Date(Math.max(issued.getTime() + 86400000, endDayMs + 86400000 + 23 * 3600000 + 59 * 60000));
 
-    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days) VALUES (?, ?, ?, ?, ?, ?, 1)`);
+    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days, event_date) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`);
     const createdTickets = [];
 
     db.transaction(() => {
       for (let day = 1; day <= days; day++) {
+        const dayDateObj = new Date(eventStart.getTime() + (day - 1) * 86400000);
+        const dayDateStr = getLocalDateString(dayDateObj);
         const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
-        const r = insertStmt.run(`${baseName} (Day ${day})`, email || '', phone || '', ticketCode, issued.toISOString(), validUntil.toISOString());
+        const r = insertStmt.run(`${baseName} (Day ${day})`, email || '', phone || '', ticketCode, issued.toISOString(), validUntil.toISOString(), dayDateStr);
         createdTickets.push(getTicketById(Number(r.lastInsertRowid)));
       }
     })();
@@ -437,16 +447,26 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
     }
 
     const issued = new Date();
-    const validUntil = new Date(issued.getTime() + Math.max(days, 2) * 24 * 60 * 60 * 1000);
-    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days) VALUES (?, '', '', ?, ?, ?, 1)`);
+    const rawStartDate = cleanText(req.body.startDate || req.body.eventDate, 20);
+    let eventStart;
+    if (rawStartDate && /^\d{4}-\d{2}-\d{2}$/.test(rawStartDate)) {
+      eventStart = new Date(rawStartDate + 'T00:00:00');
+    } else {
+      eventStart = new Date(getLocalDateString(issued) + 'T00:00:00');
+    }
+    const endDayMs = eventStart.getTime() + (days - 1) * 86400000;
+    const validUntil = new Date(Math.max(issued.getTime() + 86400000, endDayMs + 86400000 + 23 * 3600000 + 59 * 60000));
+    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days, event_date) VALUES (?, '', '', ?, ?, ?, 1, ?)`);
 
     const createdTickets = [];
     db.transaction(() => {
       for (const name of names) {
         const baseName = name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
         for (let day = 1; day <= days; day++) {
+          const dayDateObj = new Date(eventStart.getTime() + (day - 1) * 86400000);
+          const dayDateStr = getLocalDateString(dayDateObj);
           const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
-          const r = insertStmt.run(`${baseName} (Day ${day})`, ticketCode, issued.toISOString(), validUntil.toISOString());
+          const r = insertStmt.run(`${baseName} (Day ${day})`, ticketCode, issued.toISOString(), validUntil.toISOString(), dayDateStr);
           createdTickets.push(getTicketById(Number(r.lastInsertRowid)));
         }
       }
@@ -592,7 +612,20 @@ async function handleCheckinRequest(req, res, next) {
     } else {
       const todayLocal = getLocalDateString(now);
       const issuedLocal = getLocalDateString(new Date(ticket.issued_at));
-      const day1Date = getEventDay1Date() || issuedLocal;
+      let day1Date = getEventDay1Date();
+      if (!day1Date) {
+        if (ticket.event_date) {
+          try {
+            const ed = new Date(ticket.event_date + 'T00:00:00');
+            const d1 = new Date(ed.getTime() - (passDay - 1) * 86400000);
+            day1Date = getLocalDateString(d1);
+          } catch {
+            day1Date = ticket.event_date;
+          }
+        } else {
+          day1Date = issuedLocal;
+        }
+      }
 
       try {
         const d1 = new Date(day1Date + 'T00:00:00');

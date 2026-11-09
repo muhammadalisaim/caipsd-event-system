@@ -691,11 +691,21 @@ async function handleStaticApi(url, options = {}) {
     const cleanPhone = String(body.phone || '').trim();
     const days = Math.max(1, Math.min(30, Number(body.days || body.validDays || appConfig.validDays || 2)));
     const now = new Date();
-    const validUntil = new Date(now.getTime() + Math.max(days, 2) * 86400000);
+    const rawStartDate = String(body.startDate || body.eventDate || '').trim();
+    let eventStart;
+    if (rawStartDate && /^\d{4}-\d{2}-\d{2}$/.test(rawStartDate)) {
+      eventStart = new Date(rawStartDate + 'T00:00:00');
+    } else {
+      eventStart = new Date(getLocalDateString(now) + 'T00:00:00');
+    }
+    const endDayMs = eventStart.getTime() + (days - 1) * 86400000;
+    const validUntil = new Date(Math.max(now.getTime() + 86400000, endDayMs + 86400000 + 23 * 3600000 + 59 * 60000));
     const shouldSend = body.sendEmail !== false && body.sendEmail !== 'false' && Boolean(cleanEmail);
 
     const createdTickets = [];
     for (let day = 1; day <= days; day++) {
+      const dayDateObj = new Date(eventStart.getTime() + (day - 1) * 86400000);
+      const dayDateStr = getLocalDateString(dayDateObj);
       const hex = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
       const t = {
         id: Date.now() + day,
@@ -705,6 +715,7 @@ async function handleStaticApi(url, options = {}) {
         ticket_code: hex,
         issued_at: now.toISOString(),
         valid_until: validUntil.toISOString(),
+        event_date: dayDateStr,
         entry_count: 0,
         first_entry_at: null,
         last_entry_at: null,
@@ -757,11 +768,21 @@ async function handleStaticApi(url, options = {}) {
     }
     const list = getLocalTickets();
     const now = new Date();
-    const validUntil = new Date(now.getTime() + Math.max(days, 2) * 86400000);
+    const rawStartDate = String(body.startDate || body.eventDate || '').trim();
+    let eventStart;
+    if (rawStartDate && /^\d{4}-\d{2}-\d{2}$/.test(rawStartDate)) {
+      eventStart = new Date(rawStartDate + 'T00:00:00');
+    } else {
+      eventStart = new Date(getLocalDateString(now) + 'T00:00:00');
+    }
+    const endDayMs = eventStart.getTime() + (days - 1) * 86400000;
+    const validUntil = new Date(Math.max(now.getTime() + 86400000, endDayMs + 86400000 + 23 * 3600000 + 59 * 60000));
     const createdTickets = [];
     for (const name of names) {
       const baseName = name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
       for (let day = 1; day <= days; day++) {
+        const dayDateObj = new Date(eventStart.getTime() + (day - 1) * 86400000);
+        const dayDateStr = getLocalDateString(dayDateObj);
         const hex = Array.from(crypto.getRandomValues(new Uint8Array(8)))
           .map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
         const newTicket = {
@@ -772,6 +793,7 @@ async function handleStaticApi(url, options = {}) {
           ticket_code: hex,
           issued_at: now.toISOString(),
           valid_until: validUntil.toISOString(),
+          event_date: dayDateStr,
           entry_count: 0,
           first_entry_at: null,
           last_entry_at: null,
@@ -871,15 +893,25 @@ async function handleStaticApi(url, options = {}) {
       currentEventDay = Math.max(1, parseInt(body.activeDay, 10) || 1);
     } else {
       const todayStr = getLocalDateString(now);
-      const issuedStr = getLocalDateString(new Date(t.issued_at));
-      let earliestEntryDate = null;
-      for (const item of list) {
-        if (item.first_entry_at) {
-          const ed = getLocalDateString(new Date(item.first_entry_at));
-          if (!earliestEntryDate || ed < earliestEntryDate) earliestEntryDate = ed;
-        }
+      let day1Date = null;
+      if (t.event_date && /^\d{4}-\d{2}-\d{2}$/.test(t.event_date)) {
+        try {
+          const passDate = new Date(t.event_date + 'T00:00:00');
+          const d1Obj = new Date(passDate.getTime() - (passDay - 1) * 86400000);
+          day1Date = getLocalDateString(d1Obj);
+        } catch {}
       }
-      const day1Date = earliestEntryDate || issuedStr;
+      if (!day1Date) {
+        const issuedStr = getLocalDateString(new Date(t.issued_at));
+        let earliestEntryDate = null;
+        for (const item of list) {
+          if (item.first_entry_at) {
+            const ed = getLocalDateString(new Date(item.first_entry_at));
+            if (!earliestEntryDate || ed < earliestEntryDate) earliestEntryDate = ed;
+          }
+        }
+        day1Date = earliestEntryDate || issuedStr;
+      }
       try {
         const d1 = new Date(day1Date + 'T00:00:00');
         const dt = new Date(todayStr + 'T00:00:00');
@@ -1389,6 +1421,7 @@ function groupTicketsByParticipant(tickets) {
       if (!grp.validUntil || (t.valid_until && new Date(t.valid_until) > new Date(grp.validUntil))) {
         grp.validUntil = t.valid_until;
       }
+      if (!grp.eventDate && t.event_date) grp.eventDate = t.event_date;
       grp.tickets.push(t);
     }
   }
@@ -1407,6 +1440,17 @@ function groupTicketsByParticipant(tickets) {
 
   currentGroupedMap = groups;
   return Array.from(groups.values());
+}
+
+function formatEventDateShort(startDateStr, days = 1) {
+  if (!startDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(startDateStr)) return '';
+  const [y, m, d] = startDateStr.split('-').map(Number);
+  const start = new Date(y, m - 1, d);
+  const fmtShort = (dt) => dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  const fmtFull = (dt) => dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (days <= 1) return fmtFull(start);
+  const end = new Date(y, m - 1, d + days - 1);
+  return `${fmtShort(start)} – ${fmtFull(end)}`;
 }
 
 function participantCell(group) {
@@ -1433,7 +1477,7 @@ function ticketsTable(rows, withActions, groupStorage = null) {
     groupStorage.length = 0;
     groupStorage.push(...groups);
   }
-  const head = `<tr><th>PARTICIPANT</th><th>PHONE / INFO</th><th>TICKET ID</th><th>VALID UNTIL</th><th>ATTENDANCE</th>${withActions ? '<th>ACTION</th>' : ''}</tr>`;
+  const head = `<tr><th>PARTICIPANT</th><th>PHONE / INFO</th><th>TICKET ID</th><th>WORKSHOP DATE / VALIDITY</th><th>ATTENDANCE</th>${withActions ? '<th>ACTION</th>' : ''}</tr>`;
   const body = groups.map((g, idx) => {
     let codeHtml;
     if (g.tickets.length > 1) {
@@ -1446,8 +1490,12 @@ function ticketsTable(rows, withActions, groupStorage = null) {
       codeHtml = `<strong>${escapeHtml(g.tickets[0].ticket_code)}</strong>`;
     }
     const firstCode = (g.tickets && g.tickets[0]) ? g.tickets[0].ticket_code : '';
+    const eventDateStr = (g.tickets && g.tickets[0] && g.tickets[0].event_date) || g.eventDate;
+    const dateCellHtml = eventDateStr
+      ? `<strong>${escapeHtml(formatEventDateShort(eventDateStr, g.tickets.length))}</strong><small style="display:block;color:var(--text-muted, #777);font-size:11px;">Expires: ${escapeHtml(dateTimeLabel(g.validUntil))}</small>`
+      : `<span>${escapeHtml(dateTimeLabel(g.validUntil))}</span>`;
     const actionsHtml = withActions ? `<td><div class="row-actions"><a class="status-action open-ticket-page" href="ticket.html?code=${encodeURIComponent(firstCode)}" target="_blank" rel="noopener">View / Print</a><button type="button" class="status-action danger cancel-group" data-index="${idx}" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
-    return `<tr class="participant-row" data-index="${idx}" data-key="${escapeHtml(g.key)}" style="cursor:pointer;" title="Click to view passes"><td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${escapeHtml(dateTimeLabel(g.validUntil))}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
+    return `<tr class="participant-row" data-index="${idx}" data-key="${escapeHtml(g.key)}" style="cursor:pointer;" title="Click to view passes"><td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${dateCellHtml}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
   }).join('');
   return `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
@@ -1546,10 +1594,40 @@ $('#quick-export').addEventListener('click', exportCsv);
 
 /* ---- Issue ticket modal ---- */
 const ticketModal = $('#ticket-modal');
+
+function updateDatePreview(dateInput, daysSelect, previewEl) {
+  if (!previewEl) return;
+  const startVal = dateInput ? dateInput.value : '';
+  const days = Math.max(1, parseInt(daysSelect?.value, 10) || 1);
+  if (!startVal) {
+    previewEl.innerHTML = '📅 Select a start date to preview workshop schedule';
+    return;
+  }
+  const [y, m, d] = startVal.split('-').map(Number);
+  const startDate = new Date(y, m - 1, d);
+  const endDate = new Date(y, m - 1, d + days - 1);
+  const fmt = (date) => date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const fmtShort = (date) => date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  if (days === 1) {
+    previewEl.innerHTML = `📅 <strong>${fmt(startDate)}</strong> (1-Day Workshop Pass)`;
+  } else {
+    const dayBreakdown = Array.from({ length: days }, (_, i) => {
+      const dayDate = new Date(y, m - 1, d + i);
+      return `Day ${i + 1}: ${fmtShort(dayDate)}`;
+    }).join(' · ');
+    previewEl.innerHTML = `📅 <strong>${fmtShort(startDate)} – ${fmt(endDate)}</strong> (${days} Days)<br><span style="opacity:0.85;font-weight:500;">${dayBreakdown}</span>`;
+  }
+}
+
 function openTicketModal() {
   lastFocused = document.activeElement;
   const form = $('#ticket-form'); form.reset();
   if ($('#ticket-days-select')) $('#ticket-days-select').value = String(appConfig.validDays || 2);
+  const dateInput = $('#ticket-start-date');
+  if (dateInput) {
+    dateInput.value = getLocalDateString(new Date());
+  }
+  updateDatePreview($('#ticket-start-date'), $('#ticket-days-select'), $('#ticket-date-preview'));
   $('#ticket-form-error').textContent = '';
   ticketModal.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -1562,6 +1640,8 @@ function closeTicketModal() {
 $('#close-ticket-modal')?.addEventListener('click', closeTicketModal);
 $('#cancel-ticket')?.addEventListener('click', closeTicketModal);
 ticketModal?.addEventListener('click', (event) => { if (event.target === ticketModal) closeTicketModal(); });
+$('#ticket-start-date')?.addEventListener('input', () => updateDatePreview($('#ticket-start-date'), $('#ticket-days-select'), $('#ticket-date-preview')));
+$('#ticket-days-select')?.addEventListener('change', () => updateDatePreview($('#ticket-start-date'), $('#ticket-days-select'), $('#ticket-date-preview')));
 
 /* ---- Bulk ticket modal ---- */
 const bulkModal = $('#bulk-modal');
@@ -1569,6 +1649,11 @@ function openBulkModal() {
   lastFocused = document.activeElement;
   if ($('#bulk-names-input')) $('#bulk-names-input').value = '';
   if ($('#bulk-days-select')) $('#bulk-days-select').value = String(appConfig.validDays || 2);
+  const bulkDate = $('#bulk-start-date');
+  if (bulkDate) {
+    bulkDate.value = getLocalDateString(new Date());
+  }
+  updateDatePreview($('#bulk-start-date'), $('#bulk-days-select'), $('#bulk-date-preview'));
   if ($('#bulk-form-error')) $('#bulk-form-error').textContent = '';
   if (bulkModal) bulkModal.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -1585,6 +1670,8 @@ bulkModal?.addEventListener('click', (event) => { if (event.target === bulkModal
 $('#quick-bulk-tickets')?.addEventListener('click', openBulkModal);
 $('#btn-bulk-tickets')?.addEventListener('click', openBulkModal);
 $('#overview-bulk-btn')?.addEventListener('click', openBulkModal);
+$('#bulk-start-date')?.addEventListener('input', () => updateDatePreview($('#bulk-start-date'), $('#bulk-days-select'), $('#bulk-date-preview')));
+$('#bulk-days-select')?.addEventListener('change', () => updateDatePreview($('#bulk-start-date'), $('#bulk-days-select'), $('#bulk-date-preview')));
 
 /* ---- Event Duration Modal ---- */
 const durationModal = $('#duration-modal');
@@ -2058,6 +2145,7 @@ $('#ticket-form')?.addEventListener('submit', async (event) => {
     fullName: form.elements.fullName.value,
     phone: form.elements.phone ? form.elements.phone.value : '',
     email: form.elements.email ? form.elements.email.value : '',
+    startDate: form.elements.startDate ? form.elements.startDate.value : '',
     days: form.elements.days ? Number(form.elements.days.value) : (appConfig.validDays || 2)
   };
   const button = $('#save-ticket');
@@ -2081,13 +2169,14 @@ $('#bulk-form')?.addEventListener('submit', async (event) => {
   event.preventDefault();
   const text = $('#bulk-names-input').value.trim();
   if (!text) return;
+  const startDate = $('#bulk-start-date') ? $('#bulk-start-date').value : '';
   const days = $('#bulk-days-select') ? Number($('#bulk-days-select').value) : (appConfig.validDays || 2);
   const button = $('#save-bulk-btn');
   button.disabled = true;
   button.textContent = 'Generating tickets…';
   $('#bulk-form-error').textContent = '';
   try {
-    const data = await api('/api/admin/tickets/bulk', { method: 'POST', body: JSON.stringify({ names: text, days }) });
+    const data = await api('/api/admin/tickets/bulk', { method: 'POST', body: JSON.stringify({ names: text, days, startDate }) });
     closeBulkModal();
     const count = data.count || (data.tickets ? data.tickets.length : '');
     const pCount = data.participantCount ? ` (${data.participantCount} participant${data.participantCount === 1 ? '' : 's'} × ${days} passes)` : '';

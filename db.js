@@ -78,6 +78,11 @@ try {
   db.exec("ALTER TABLE tickets ADD COLUMN max_days INTEGER NOT NULL DEFAULT 2");
 } catch {}
 
+// Migration: add event_date column if missing
+try {
+  db.exec("ALTER TABLE tickets ADD COLUMN event_date TEXT");
+} catch {}
+
 // Migration: remove unique constraint on email if present in existing table
 try {
   const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tickets'").get();

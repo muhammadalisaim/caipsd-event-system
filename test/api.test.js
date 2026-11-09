@@ -298,3 +298,35 @@ test('configurable duration (2, 3, 4 days) and check-in limits', async () => {
   // Reset duration back to 2 days
   await call('/api/admin/settings/duration', { method: 'POST', body: { validDays: 2 } });
 });
+
+test('issues tickets with explicit startDate and calculates daily event dates', async () => {
+  const r = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: {
+      fullName: 'Kamran Ali',
+      days: 3,
+      startDate: '2026-11-26'
+    }
+  });
+  assert.equal(r.status, 201);
+  assert.equal(r.data.tickets.length, 3);
+  assert.equal(r.data.tickets[0].event_date, '2026-11-26');
+  assert.equal(r.data.tickets[1].event_date, '2026-11-27');
+  assert.equal(r.data.tickets[2].event_date, '2026-11-28');
+  assert.ok(new Date(r.data.tickets[0].valid_until) >= new Date('2026-11-28T23:59:59.000Z'));
+
+  // Test bulk with startDate
+  const bulkRes = await call('/api/admin/tickets/bulk', {
+    method: 'POST',
+    body: {
+      names: 'Maryam\nShahzad',
+      days: 2,
+      startDate: '2026-12-01'
+    }
+  });
+  assert.equal(bulkRes.status, 201);
+  assert.equal(bulkRes.data.tickets.length, 4);
+  assert.equal(bulkRes.data.tickets[0].event_date, '2026-12-01');
+  assert.equal(bulkRes.data.tickets[1].event_date, '2026-12-02');
+});
+
