@@ -93,6 +93,24 @@ function isSameCalendarDay(d1, d2) {
   return localMatch || utcMatch;
 }
 
+function getLocalDateString(date = new Date(), timeZone = 'Asia/Karachi') {
+  try {
+    const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
+    if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const day = parts.find((p) => p.type === 'day')?.value;
+    if (y && m && day) return `${y}-${m}-${day}`;
+  } catch {}
+  try {
+    const d = new Date(date);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
 function getGoogleWebAppUrl() {
   return localStorage.getItem('caipsd_sheets_webhook_url') || GOOGLE_WEB_APP_URL;
 }
