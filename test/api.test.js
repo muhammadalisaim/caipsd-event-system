@@ -56,67 +56,77 @@ test('ticket validation', async () => {
   assert.equal((await post({ fullName: 'A' })).status, 400);
 });
 
-let ticket; let ticketId;
-test('issues a ticket by participant name', async () => {
+let ticket; let ticket2; let ticketId; let ticket2Id;
+test('issues a ticket pair (Day 1 & Day 2) by participant name', async () => {
   const r = await call('/api/admin/tickets', { method: 'POST', body: { fullName: 'Ayesha Khan' } });
   assert.equal(r.status, 201);
   ticket = r.data.ticket; ticketId = ticket.id;
+  ticket2 = r.data.ticket2; ticket2Id = ticket2.id;
   assert.match(ticket.ticket_code, /^[A-F0-9]{16}$/);
-  assert.equal(ticket.full_name, 'Ayesha Khan');
-  const days = Math.round((new Date(ticket.valid_until) - new Date(ticket.issued_at)) / 86400000);
-  assert.ok(days >= 2);
+  assert.match(ticket2.ticket_code, /^[A-F0-9]{16}$/);
+  assert.equal(ticket.full_name, 'Ayesha Khan (Day 1)');
+  assert.equal(ticket2.full_name, 'Ayesha Khan (Day 2)');
+  assert.equal(ticket.max_days, 1);
+  assert.equal(ticket2.max_days, 1);
 });
 
-test('bulk issue tickets by list of names', async () => {
+test('bulk issue tickets creates 2 passes per participant name', async () => {
   const r = await call('/api/admin/tickets/bulk', { method: 'POST', body: { names: 'Bilal Ahmed\nFatima Noor\nUsman Ali' } });
   assert.equal(r.status, 201);
-  assert.equal(r.data.count, 3);
-  assert.equal(r.data.tickets.length, 3);
+  assert.equal(r.data.count, 6);
+  assert.equal(r.data.tickets.length, 6);
+  assert.equal(r.data.participantCount, 3);
 });
 
 test('public ticket page loads without error', async () => {
   const r = await call(`/api/ticket/${ticket.ticket_code}`, { auth: false });
   assert.equal(r.status, 200);
   assert.match(r.data.ticket.qrDataUrl, /^data:image\/png/);
-  assert.equal(r.data.ticket.full_name, 'Ayesha Khan');
+  assert.equal(r.data.ticket.full_name, 'Ayesha Khan (Day 1)');
   assert.equal((await call('/api/ticket/NOTAREALTICKET00', { auth: false })).status, 404);
 });
 
-test('gate check-in allows 1 scan on Day 1 and blocks second scan on the same day', async () => {
+test('gate check-in allows 1 scan on Day 1 and blocks Day 2 ticket on Day 1', async () => {
+  // Attempting to scan Day 2 ticket on Day 1 -> rejected (409)
+  const day2Early = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket2.ticket_code } });
+  assert.equal(day2Early.status, 409);
+  assert.ok(day2Early.data.day2Early);
+
+  // Day 1 ticket scan -> allowed
   const first = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
   assert.equal(first.status, 200);
   assert.equal(first.data.dayNumber, 1);
   assert.equal(first.data.repeat, false);
 
-  // Second scan today -> must be rejected (409)
+  // Second scan of Day 1 ticket -> rejected (409 already used)
   const secondToday = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
   assert.equal(secondToday.status, 409);
-  assert.ok(secondToday.data.alreadyScannedToday);
+  assert.ok(secondToday.data.alreadyUsed);
 
   // Invalid formats and unknown codes
   assert.equal((await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: 'zzz' } })).status, 400);
   assert.equal((await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: '0000000000000000' } })).status, 404);
 });
 
-test('gate check-in allows 1 scan on Day 2, and blocks third scan', async () => {
-  // Simulate Day 1 entry occurred yesterday
+test('gate check-in allows Day 2 ticket on Day 2 and blocks repeated scan', async () => {
+  // Simulate Day 1 was yesterday
   db.prepare('UPDATE entries SET scanned_at = ? WHERE ticket_id = ?').run(new Date(Date.now() - 86400000).toISOString(), ticketId);
+  db.prepare('UPDATE tickets SET issued_at = ? WHERE id = ?').run(new Date(Date.now() - 86400000).toISOString(), ticket2Id);
 
-  // Day 2 scan -> allowed (visit 2)
-  const day2Scan = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
+  // Day 2 scan -> allowed
+  const day2Scan = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket2.ticket_code } });
   assert.equal(day2Scan.status, 200);
-  assert.equal(day2Scan.data.dayNumber, 2);
-  assert.equal(day2Scan.data.repeat, true);
+  assert.equal(day2Scan.data.dayNumber, 1); // 1st entry of Day 2 pass
 
-  // Repeated scan on Day 2 -> rejected (409 already scanned today)
-  const day2Repeat = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
+  // Repeated scan of Day 2 ticket -> rejected (409 already used)
+  const day2Repeat = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket2.ticket_code } });
   assert.equal(day2Repeat.status, 409);
+  assert.ok(day2Repeat.data.alreadyUsed);
 
-  // Third scan simulation (both days used, new day) -> rejected (409 limit reached)
-  db.prepare('UPDATE entries SET scanned_at = ? WHERE id = (SELECT id FROM entries WHERE ticket_id = ? ORDER BY id DESC LIMIT 1)').run(new Date(Date.now() - 40000000).toISOString(), ticketId);
-  const thirdScan = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
-  assert.equal(thirdScan.status, 409);
-  assert.ok(thirdScan.data.limitReached);
+  // Attempting to re-use Day 1 ticket on Day 2 -> rejected (409 already used)
+  const day1Recheck = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket.ticket_code } });
+  assert.equal(day1Recheck.status, 409);
+  assert.ok(day1Recheck.data.alreadyUsed);
 });
 
 test('expired tickets are rejected', async () => {
@@ -131,8 +141,8 @@ test('expired tickets are rejected', async () => {
 
 test('summary counts and search', async () => {
   const s = await call('/api/admin/summary');
-  assert.deepEqual({ total: s.data.total, expired: s.data.expired, awaiting: s.data.awaiting }, { total: 4, expired: 1, awaiting: 3 });
-  assert.equal((await call('/api/admin/tickets?q=bilal')).data.tickets.length, 1);
+  assert.deepEqual({ total: s.data.total, expired: s.data.expired, awaiting: s.data.awaiting }, { total: 8, expired: 1, awaiting: 6 });
+  assert.equal((await call('/api/admin/tickets?q=bilal')).data.tickets.length, 2);
   assert.equal((await call('/api/admin/tickets?q=%25')).data.tickets.length, 0);
 });
 
@@ -146,7 +156,7 @@ test('CSV export neutralises formulas', async () => {
   await call('/api/admin/tickets', { method: 'POST', body: { fullName: '=cmd|calc', email: 'f@example.com', phone: '+92 300 0000000', sendEmail: false } });
   const r = await call('/api/admin/export.csv');
   assert.equal(r.status, 200);
-  assert.ok(r.data.includes(`"'=cmd|calc"`));
+  assert.ok(r.data.includes(`"'=cmd|calc`));
 });
 
 test('portal, ticket page, 404 page and vendored scanner are served', async () => {
@@ -233,50 +243,34 @@ test('configurable duration (2, 3, 4 days) and check-in limits', async () => {
   assert.equal(setDur.status, 200);
   assert.equal(setDur.data.validDays, 4);
 
-  // Issue ticket using the new default (4 days)
+  // Issue ticket using the new default (4 days validity)
   const t4Res = await call('/api/admin/tickets', {
     method: 'POST',
     body: { fullName: 'Hamza Tariq' }
   });
   assert.equal(t4Res.status, 201);
   const t4 = t4Res.data.ticket;
-  assert.equal(t4.max_days, 4);
+  assert.equal(t4.max_days, 1);
+  assert.ok(new Date(t4.valid_until) > new Date(t4.issued_at));
 
-  // Issue ticket explicitly overriding to 3 days
+  // Issue ticket explicitly with days parameter
   const t3Res = await call('/api/admin/tickets', {
     method: 'POST',
     body: { fullName: 'Zainab Bibi', days: 3 }
   });
   assert.equal(t3Res.status, 201);
   const t3 = t3Res.data.ticket;
-  assert.equal(t3.max_days, 3);
+  assert.equal(t3.max_days, 1);
 
-  // Verify 3-day ticket allows Day 1, Day 2, Day 3 and blocks Day 4
-  // Day 1
+  // Day 1 scan -> allowed
   const d1 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });
   assert.equal(d1.status, 200);
   assert.equal(d1.data.dayNumber, 1);
-  assert.equal(d1.data.maxDays, 3);
 
-  // Simulate Day 2
-  db.prepare('UPDATE entries SET scanned_at = ? WHERE ticket_id = ?').run(new Date(Date.now() - 86400000 * 2).toISOString(), t3.id);
+  // Repeated scan -> blocked because 1 ticket allows 1 entry
   const d2 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });
-  assert.equal(d2.status, 200);
-  assert.equal(d2.data.dayNumber, 2);
-
-  // Simulate Day 3
-  db.prepare('UPDATE entries SET scanned_at = ? WHERE id = (SELECT id FROM entries WHERE ticket_id = ? ORDER BY id DESC LIMIT 1)').run(new Date(Date.now() - 86400000).toISOString(), t3.id);
-  const d3 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });
-  assert.equal(d3.status, 200);
-  assert.equal(d3.data.dayNumber, 3);
-  assert.ok(d3.data.message.includes('Final Day'));
-
-  // Day 4 attempt -> blocked because max_days is 3
-  db.prepare('UPDATE entries SET scanned_at = ? WHERE id = (SELECT id FROM entries WHERE ticket_id = ? ORDER BY id DESC LIMIT 1)').run(new Date(Date.now() - 40000000).toISOString(), t3.id);
-  const d4 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });
-  assert.equal(d4.status, 409);
-  assert.ok(d4.data.limitReached);
-  assert.equal(d4.data.maxDays, 3);
+  assert.equal(d2.status, 409);
+  assert.ok(d2.data.alreadyUsed);
 
   // Reset duration back to 2 days
   await call('/api/admin/settings/duration', { method: 'POST', body: { validDays: 2 } });

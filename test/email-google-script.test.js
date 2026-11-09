@@ -85,7 +85,7 @@ test('a new ticket is emailed automatically, with the QR image, link and secret'
   first = r.data.ticket;
 
   const sent = emailCalls();
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
   assert.equal(sent[0].to, 'hina@example.com');
   assert.equal(sent[0].ticketCode, first.ticket_code);
   assert.equal(sent[0].secret, 'shared-secret-123');
@@ -119,7 +119,7 @@ test('"Email all" sends to tickets that are still waiting', async () => {
   emailMode = 'ok';
   const all = await call('/api/admin/tickets/email-all', { method: 'POST', body: { mode: 'pending' } });
   assert.equal(all.status, 200);
-  assert.equal(all.data.sent, 1);
+  assert.equal(all.data.sent, 3);
   assert.equal(all.data.failed, 0);
 });
 

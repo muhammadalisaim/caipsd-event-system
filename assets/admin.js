@@ -507,51 +507,78 @@ async function handleStaticApi(url, options = {}) {
 
   if (url === '/api/admin/tickets' && method === 'POST') {
     const list = getLocalTickets();
-    const hex = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    const rawFullName = String(body.fullName || 'Participant').trim();
+    const baseName = rawFullName.replace(/\s*\((?:Day\s*[12]|Day1|Day2)\)$/i, '').trim();
+    const cleanEmail = String(body.email || '').trim().toLowerCase();
+    const cleanPhone = String(body.phone || '').trim();
     const now = new Date();
     const validUntil = new Date(now.getTime() + 3 * 86400000);
-    const cleanEmail = String(body.email || '').trim().toLowerCase();
-    const cleanFullName = String(body.fullName || 'Participant').trim();
-    const cleanPhone = String(body.phone || '').trim();
     const shouldSend = body.sendEmail !== false && body.sendEmail !== 'false' && Boolean(cleanEmail);
 
-    const newTicket = {
+    const hex1 = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    const hex2 = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+
+    const t1 = {
       id: Date.now(),
-      full_name: cleanFullName,
+      full_name: `${baseName} (Day 1)`,
       email: cleanEmail,
       phone: cleanPhone,
-      ticket_code: hex,
+      ticket_code: hex1,
       issued_at: now.toISOString(),
       valid_until: validUntil.toISOString(),
       entry_count: 0,
       first_entry_at: null,
       last_entry_at: null,
       email_status: 'not_sent',
+      max_days: 1,
+      status: 'valid'
+    };
+
+    const t2 = {
+      id: Date.now() + 1,
+      full_name: `${baseName} (Day 2)`,
+      email: cleanEmail,
+      phone: cleanPhone,
+      ticket_code: hex2,
+      issued_at: now.toISOString(),
+      valid_until: validUntil.toISOString(),
+      entry_count: 0,
+      first_entry_at: null,
+      last_entry_at: null,
+      email_status: 'not_sent',
+      max_days: 1,
       status: 'valid'
     };
 
     let emailResult = { status: 'not_sent' };
     if (shouldSend) {
       try {
-        await pushTicketEmailToSheet(newTicket);
-        newTicket.email_status = 'sent';
-        newTicket.email_error = null;
+        await pushTicketEmailToSheet(t1);
+        await pushTicketEmailToSheet(t2);
+        t1.email_status = 'sent';
+        t2.email_status = 'sent';
         emailResult = { status: 'sent' };
       } catch (err) {
         console.error('Failed to email new ticket:', err);
-        newTicket.email_status = 'failed';
-        newTicket.email_error = err.message;
         emailResult = { status: 'failed', error: err.message };
       }
     }
 
-    list.unshift(newTicket);
+    list.unshift(t2);
+    list.unshift(t1);
     saveLocalTickets(list);
 
-    // Save ticket with its real email_status in Google Sheet
-    pushTicketToSheet(newTicket, 'appendTicket');
+    // Save tickets with their real email_status in Google Sheet
+    pushTicketToSheet(t1, 'appendTicket');
+    pushTicketToSheet(t2, 'appendTicket');
 
-    return { ticket: newTicket, email: emailResult };
+    return {
+      message: `2 tickets generated for ${baseName} (Day 1 & Day 2 passes).`,
+      ticket: t1,
+      ticket2: t2,
+      tickets: [t1, t2],
+      email: emailResult
+    };
   }
 
   if (url === '/api/admin/tickets/bulk' && method === 'POST') {
@@ -567,35 +594,39 @@ async function handleStaticApi(url, options = {}) {
     }
     const list = getLocalTickets();
     const now = new Date();
-    const validUntil = new Date(now.getTime() + days * 86400000);
+    const validUntil = new Date(now.getTime() + Math.max(days, 2) * 86400000);
     const createdTickets = [];
     for (const name of names) {
-      const hex = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-        .map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-      const newTicket = {
-        id: Date.now() + Math.floor(Math.random() * 1000000),
-        full_name: name,
-        email: '',
-        phone: '',
-        ticket_code: hex,
-        issued_at: now.toISOString(),
-        valid_until: validUntil.toISOString(),
-        entry_count: 0,
-        first_entry_at: null,
-        last_entry_at: null,
-        email_status: 'not_sent',
-        max_days: days,
-        status: 'valid'
-      };
-      createdTickets.push(newTicket);
-      list.unshift(newTicket);
+      const baseName = name.replace(/\s*\((?:Day\s*[12]|Day1|Day2)\)$/i, '').trim();
+      for (const day of [1, 2]) {
+        const hex = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+          .map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        const newTicket = {
+          id: Date.now() + Math.floor(Math.random() * 10000000),
+          full_name: `${baseName} (Day ${day})`,
+          email: '',
+          phone: '',
+          ticket_code: hex,
+          issued_at: now.toISOString(),
+          valid_until: validUntil.toISOString(),
+          entry_count: 0,
+          first_entry_at: null,
+          last_entry_at: null,
+          email_status: 'not_sent',
+          max_days: 1,
+          status: 'valid'
+        };
+        createdTickets.push(newTicket);
+        list.unshift(newTicket);
+      }
     }
     saveLocalTickets(list);
     // Push all tickets in one clean batch to Google Sheet
     syncAllTicketsToSheet(list).catch(() => {});
     return {
-      message: `Successfully issued ${createdTickets.length} ticket${createdTickets.length === 1 ? '' : 's'} (${days} day${days === 1 ? '' : 's'} pass).`,
+      message: `Successfully issued ${createdTickets.length} tickets (${names.length} participants × 2 passes: Day 1 & Day 2).`,
       count: createdTickets.length,
+      participantCount: names.length,
       days,
       tickets: createdTickets
     };
@@ -661,12 +692,33 @@ async function handleStaticApi(url, options = {}) {
       throw err;
     }
 
-    const maxDays = Number(t.max_days) || 2;
+    const maxDays = Number(t.max_days) || 1;
     if ((t.entry_count || 0) >= maxDays) {
-      const err = new Error(`Already used ticket! Yeh ticket pehle hi all ${maxDays} din (${maxDays} entries) use ho chuka hai.`);
+      const err = new Error('Already used ticket! Yeh ticket pehle hi use ho chuka hai (Entry Denied).');
       err.status = 409;
       err.data = { ticket: t, limitReached: true, alreadyUsed: true, maxDays };
       throw err;
+    }
+
+    // Day 2 restriction
+    const isDay2 = /\(Day\s*2\)/i.test(t.full_name || '');
+    if (isDay2) {
+      const todayStr = getLocalDateString(now);
+      const issuedStr = getLocalDateString(new Date(t.issued_at));
+      let earliestEntryDate = null;
+      for (const item of list) {
+        if (item.first_entry_at) {
+          const ed = getLocalDateString(new Date(item.first_entry_at));
+          if (!earliestEntryDate || ed < earliestEntryDate) earliestEntryDate = ed;
+        }
+      }
+      const day1Date = earliestEntryDate || issuedStr;
+      if (todayStr <= day1Date) {
+        const err = new Error('Day 2 Ticket! Yeh ticket sirf Day 2 par use ho sakta hai (Entry Denied).');
+        err.status = 409;
+        err.data = { ticket: t, day2Early: true, alreadyUsed: false, maxDays };
+        throw err;
+      }
     }
 
     // 1-scan-per-calendar-day enforcement: check both local timezone and UTC date
@@ -677,7 +729,7 @@ async function handleStaticApi(url, options = {}) {
     );
 
     if (alreadyUsedToday) {
-      const err = new Error('Already used ticket! Yeh ticket aaj pehle hi use ho chuka hai (1 din mein sirf 1 bar scan ho sakta hai). Next day dobara scan ho sakega.');
+      const err = new Error('Already used ticket! Yeh ticket aaj pehle hi use ho chuka hai (Entry Denied).');
       err.status = 409;
       err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
       throw err;
@@ -712,16 +764,14 @@ async function handleStaticApi(url, options = {}) {
     }
 
     const dayNumber = t.entry_count;
-    const isFinalDay = dayNumber >= maxDays;
-    const message = isFinalDay
-      ? `Entry allowed! Welcome (Day ${dayNumber} of ${maxDays} check-in successful · Final Day).`
-      : `Entry allowed! Welcome (Day ${dayNumber} of ${maxDays} check-in successful).`;
+    const dayTag = isDay2 ? 'Day 2' : (/\(Day\s*1\)/i.test(t.full_name || '') ? 'Day 1' : 'Pass');
+    const message = `Entry allowed! Welcome (${dayTag} check-in successful).`;
 
     return {
       message,
       dayNumber,
       maxDays,
-      repeat: dayNumber > 1,
+      repeat: false,
       ticket: t
     };
   }
@@ -1569,7 +1619,8 @@ $('#ticket-form')?.addEventListener('submit', async (event) => {
   try {
     const data = await api('/api/admin/tickets', { method: 'POST', body: JSON.stringify(payload) });
     closeTicketModal();
-    toast(`✓ Ticket generated for ${data.ticket.full_name}. (ID: ${data.ticket.ticket_code})`);
+    const baseName = data.ticket.full_name.replace(/\s*\(Day\s*[12]\)$/i, '');
+    toast(`✓ 2 tickets generated for ${baseName} (Day 1 & Day 2 passes).`);
     refreshStats();
     if ($('#view-tickets').classList.contains('active')) loadTickets();
     else if ($('#view-overview').classList.contains('active')) loadDashboard();
@@ -1590,7 +1641,8 @@ $('#bulk-form')?.addEventListener('submit', async (event) => {
     const data = await api('/api/admin/tickets/bulk', { method: 'POST', body: JSON.stringify({ names: text, days }) });
     closeBulkModal();
     const count = data.count || (data.tickets ? data.tickets.length : '');
-    const msg = data.message || (count ? `Successfully issued ${count} tickets.` : 'Tickets issued successfully.');
+    const pCount = data.participantCount ? ` (${data.participantCount} participants × 2 passes)` : '';
+    const msg = data.message || (count ? `Successfully issued ${count} tickets${pCount}.` : 'Tickets issued successfully.');
     toast(`✓ ${msg}`);
     refreshStats();
     if ($('#view-tickets').classList.contains('active')) loadTickets();
@@ -1639,27 +1691,40 @@ async function performCheckin(ticketCode) {
   note.className = 'scanner-message';
   try {
     const result = await api('/api/check-in', { method: 'POST', body: JSON.stringify({ ticketCode: cleaned }) });
-    const maxDays = Number(result.maxDays) || 2;
-    const isFinal = result.dayNumber >= maxDays;
-    const visitInfo = `Day ${result.dayNumber} of ${maxDays} Entry Recorded${isFinal ? ' · Final Day' : ''}`;
-    showCheckinResult(result.repeat ? 'warning' : 'success', result.message, result.ticket, visitInfo);
+    const isDay2 = /\(Day\s*2\)/i.test((result.ticket && result.ticket.full_name) || '');
+    const isDay1 = /\(Day\s*1\)/i.test((result.ticket && result.ticket.full_name) || '');
+    const visitInfo = isDay2 ? 'Day 2 Pass · Entry Recorded' : (isDay1 ? 'Day 1 Pass · Entry Recorded' : 'Entry Recorded');
+    showCheckinResult('success', result.message, result.ticket, visitInfo);
     note.textContent = result.message; note.className = 'scanner-message success';
     $('#ticket-code-input').value = '';
     refreshStats();
   } catch (error) {
-    const isAlreadyUsed = Boolean(
+    const isDay2Early = Boolean(
+      (error.data && error.data.day2Early) ||
+      (error.message && (error.message.includes('Day 2 Ticket') || error.message.includes('sirf Day 2')))
+    );
+    const isAlreadyUsed = !isDay2Early && Boolean(
       (error.data && (error.data.alreadyUsed || error.data.alreadyScannedToday || error.data.limitReached)) ||
       (error.message && (error.message.includes('already used') || error.message.includes('Already used') || error.message.includes('pehle hi use') || error.message.includes('limit reached')))
     );
-    const displayHeadline = isAlreadyUsed
-      ? 'Already used ticket! (Entry Denied)'
-      : error.message;
-    const noteText = isAlreadyUsed
-      ? (error.message || 'Already used ticket! Yeh ticket aaj pehle hi use ho chuka hai (1 din mein sirf 1 bar scan ho sakta hai). Next day dobara scan ho sakega.')
-      : error.message;
-    showCheckinResult(isAlreadyUsed ? 'warning' : 'error', displayHeadline, error.data && error.data.ticket, isAlreadyUsed ? 'ALREADY USED TICKET · ENTRY DENIED' : '');
+    let displayHeadline;
+    let badgeText;
+    let noteText = error.message;
+
+    if (isDay2Early) {
+      displayHeadline = 'Day 2 Ticket! (Entry Denied)';
+      badgeText = 'DAY 2 TICKET · NOT ALLOWED TODAY';
+    } else if (isAlreadyUsed) {
+      displayHeadline = 'Already used ticket! (Entry Denied)';
+      badgeText = 'ALREADY USED TICKET · ENTRY DENIED';
+    } else {
+      displayHeadline = error.message;
+      badgeText = '';
+    }
+
+    showCheckinResult((isDay2Early || isAlreadyUsed) ? 'warning' : 'error', displayHeadline, error.data && error.data.ticket, badgeText);
     note.textContent = noteText;
-    note.className = isAlreadyUsed ? 'scanner-message warning' : 'scanner-message error';
+    note.className = (isDay2Early || isAlreadyUsed) ? 'scanner-message warning' : 'scanner-message error';
   }
 }
 $('#manual-checkin-form').addEventListener('submit', async (event) => {
