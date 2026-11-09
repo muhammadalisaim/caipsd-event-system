@@ -11,6 +11,7 @@ process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'test-secret-test-secret-test-secret';
 process.env.ADMIN_EMAIL = 'admin@test.org';
 process.env.ADMIN_PASSWORD = 'TestPassword123!';
+process.env.TICKET_VALID_DAYS = '2';
 delete process.env.SMTP_JSON; // no SMTP: the Google Script is the only email channel
 delete process.env.SMTP_USER;
 delete process.env.SMTP_PASS;

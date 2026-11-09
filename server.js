@@ -361,45 +361,44 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'Please enter the participant full name.' });
     }
 
-    const baseName = rawFullName.replace(/\s*\((?:Day\s*[12]|Day1|Day2)\)$/i, '').trim();
+    const baseName = rawFullName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
     const issued = new Date();
     const validUntil = new Date(issued.getTime() + Math.max(days, 2) * 24 * 60 * 60 * 1000);
 
     const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days) VALUES (?, ?, ?, ?, ?, ?, 1)`);
-    const code1 = crypto.randomBytes(8).toString('hex').toUpperCase();
-    const code2 = crypto.randomBytes(8).toString('hex').toUpperCase();
+    const createdTickets = [];
 
-    let ticket1Id;
-    let ticket2Id;
     db.transaction(() => {
-      const r1 = insertStmt.run(`${baseName} (Day 1)`, email || '', phone || '', code1, issued.toISOString(), validUntil.toISOString());
-      ticket1Id = Number(r1.lastInsertRowid);
-      const r2 = insertStmt.run(`${baseName} (Day 2)`, email || '', phone || '', code2, issued.toISOString(), validUntil.toISOString());
-      ticket2Id = Number(r2.lastInsertRowid);
+      for (let day = 1; day <= days; day++) {
+        const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
+        const r = insertStmt.run(`${baseName} (Day ${day})`, email || '', phone || '', ticketCode, issued.toISOString(), validUntil.toISOString());
+        createdTickets.push(getTicketById(Number(r.lastInsertRowid)));
+      }
     })();
-
-    let ticket1 = getTicketById(ticket1Id);
-    let ticket2 = getTicketById(ticket2Id);
 
     const wantsEmail = req.body.sendEmail !== false && req.body.sendEmail !== 'false' && Boolean(email);
     const emailConfigured = emailAvailable();
     let emailResult = { status: 'not_sent', skipped: wantsEmail ? 'not_configured' : 'declined' };
     if (wantsEmail && emailConfigured) {
-      emailResult = await emailTicket(ticket1);
-      await emailTicket(ticket2);
-      ticket1 = getTicketById(ticket1.id);
-      ticket2 = getTicketById(ticket2.id);
+      for (let i = 0; i < createdTickets.length; i++) {
+        emailResult = await emailTicket(createdTickets[i]);
+        createdTickets[i] = getTicketById(createdTickets[i].id);
+      }
     }
 
     // Auto-sync tickets to Google Sheet in background
-    sheetsAppendTicket(serializeTicket(ticket1)).catch((err) => console.error('Sheet append error (Day 1):', err.message));
-    sheetsAppendTicket(serializeTicket(ticket2)).catch((err) => console.error('Sheet append error (Day 2):', err.message));
+    for (const t of createdTickets) {
+      sheetsAppendTicket(serializeTicket(t)).catch((err) => console.error(`Sheet append error (${t.full_name}):`, err.message));
+    }
+
+    const ticket1 = createdTickets[0];
+    const ticket2 = createdTickets[1];
 
     res.status(201).json({
-      message: `2 tickets generated for ${baseName} (Day 1 & Day 2 passes).`,
+      message: `${createdTickets.length} ticket${createdTickets.length === 1 ? '' : 's'} generated for ${baseName} (${createdTickets.length} daily pass${createdTickets.length === 1 ? '' : 'es'}).`,
       ticket: serializeTicket(ticket1),
-      ticket2: serializeTicket(ticket2),
-      tickets: [serializeTicket(ticket1), serializeTicket(ticket2)],
+      ticket2: ticket2 ? serializeTicket(ticket2) : undefined,
+      tickets: createdTickets.map(serializeTicket),
       email: emailResult
     });
   } catch (error) { next(error); }
@@ -427,8 +426,8 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
     const createdTickets = [];
     db.transaction(() => {
       for (const name of names) {
-        const baseName = name.replace(/\s*\((?:Day\s*[12]|Day1|Day2)\)$/i, '').trim();
-        for (const day of [1, 2]) {
+        const baseName = name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+        for (let day = 1; day <= days; day++) {
           const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
           const r = insertStmt.run(`${baseName} (Day ${day})`, ticketCode, issued.toISOString(), validUntil.toISOString());
           createdTickets.push(getTicketById(Number(r.lastInsertRowid)));
@@ -441,7 +440,7 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
     syncAllTickets(allCurrentTickets).catch((err) => console.error('Sheet bulk syncAll error:', err.message));
 
     res.status(201).json({
-      message: `Successfully issued ${createdTickets.length} tickets (${names.length} participants × 2 passes: Day 1 & Day 2).`,
+      message: `Successfully issued ${createdTickets.length} tickets (${names.length} participant${names.length === 1 ? '' : 's'} × ${days} pass${days === 1 ? '' : 'es'}).`,
       count: createdTickets.length,
       participantCount: names.length,
       days,
@@ -567,18 +566,30 @@ async function handleCheckinRequest(req, res, next) {
       });
     }
 
-    // 2. Day 2 Ticket restriction: Day 2 ticket can only be used on Day 2!
-    const isDay2 = /\(Day\s*2\)/i.test(ticket.full_name || '');
-    if (isDay2) {
+    // 2. Day N Ticket restriction: Day N ticket can only be used on Day N (or after)!
+    const dayMatch = (ticket.full_name || '').match(/\(Day\s*(\d+)\)/i);
+    const passDay = dayMatch ? parseInt(dayMatch[1], 10) : 1;
+    if (passDay > 1) {
       const todayLocal = getLocalDateString(now);
       const issuedLocal = getLocalDateString(new Date(ticket.issued_at));
       const day1Date = getEventDay1Date() || issuedLocal;
 
-      if (todayLocal <= day1Date) {
+      let currentEventDay = 1;
+      try {
+        const d1 = new Date(day1Date + 'T00:00:00');
+        const dt = new Date(todayLocal + 'T00:00:00');
+        const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
+        currentEventDay = Math.max(1, diffDays + 1);
+      } catch {}
+
+      if (currentEventDay < passDay) {
         return res.status(409).json({
-          error: 'Day 2 Ticket! Yeh ticket sirf Day 2 par use ho sakta hai (Entry Denied).',
+          error: `Day ${passDay} Ticket! Yeh ticket sirf Day ${passDay} par use ho sakta hai (Entry Denied).`,
           alreadyUsed: false,
-          day2Early: true,
+          day2Early: passDay === 2,
+          dayEarly: true,
+          passDay,
+          currentEventDay,
           maxDays,
           ticket: serializeTicket(ticket)
         });
@@ -621,7 +632,7 @@ async function handleCheckinRequest(req, res, next) {
     sheetsUpdateTicket(updated).catch((err) => console.error('Sheet update error:', err.message));
 
     const dayNumber = updated.entry_count;
-    const dayTag = isDay2 ? 'Day 2' : (/\(Day\s*1\)/i.test(ticket.full_name || '') ? 'Day 1' : 'Pass');
+    const dayTag = dayMatch ? `Day ${passDay}` : 'Pass';
     const message = `Entry allowed! Welcome (${dayTag} check-in successful).`;
 
     res.json({

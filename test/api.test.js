@@ -243,24 +243,36 @@ test('configurable duration (2, 3, 4 days) and check-in limits', async () => {
   assert.equal(setDur.status, 200);
   assert.equal(setDur.data.validDays, 4);
 
-  // Issue ticket using the new default (4 days validity)
+  // Issue ticket using the new default (4 days validity -> 4 tickets generated)
   const t4Res = await call('/api/admin/tickets', {
     method: 'POST',
     body: { fullName: 'Hamza Tariq' }
   });
   assert.equal(t4Res.status, 201);
+  assert.equal(t4Res.data.tickets.length, 4);
+  assert.equal(t4Res.data.tickets[0].full_name, 'Hamza Tariq (Day 1)');
+  assert.equal(t4Res.data.tickets[3].full_name, 'Hamza Tariq (Day 4)');
   const t4 = t4Res.data.ticket;
   assert.equal(t4.max_days, 1);
   assert.ok(new Date(t4.valid_until) > new Date(t4.issued_at));
 
-  // Issue ticket explicitly with days parameter
+  // Issue ticket explicitly with days: 3 -> 3 tickets generated
   const t3Res = await call('/api/admin/tickets', {
     method: 'POST',
     body: { fullName: 'Zainab Bibi', days: 3 }
   });
   assert.equal(t3Res.status, 201);
+  assert.equal(t3Res.data.tickets.length, 3);
+  assert.equal(t3Res.data.tickets[0].full_name, 'Zainab Bibi (Day 1)');
+  assert.equal(t3Res.data.tickets[1].full_name, 'Zainab Bibi (Day 2)');
+  assert.equal(t3Res.data.tickets[2].full_name, 'Zainab Bibi (Day 3)');
   const t3 = t3Res.data.ticket;
   assert.equal(t3.max_days, 1);
+
+  // Day 3 ticket cannot be scanned on Day 1
+  const day3Early = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3Res.data.tickets[2].ticket_code } });
+  assert.equal(day3Early.status, 409);
+  assert.ok(day3Early.data.dayEarly);
 
   // Day 1 scan -> allowed
   const d1 = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: t3.ticket_code } });

@@ -421,13 +421,13 @@
         <div class="admin-form-grid">
           <label>Event Duration / Days
             <select name="days" id="ticket-days-select">
-              <option value="1">1 Day Pass (1 Scan allowed)</option>
-              <option value="2" selected>2 Days Pass (1 Scan/Day · 2 Scans max)</option>
-              <option value="3">3 Days Pass (1 Scan/Day · 3 Scans max)</option>
-              <option value="4">4 Days Pass (1 Scan/Day · 4 Scans max)</option>
-              <option value="5">5 Days Pass (1 Scan/Day · 5 Scans max)</option>
-              <option value="6">6 Days Pass (1 Scan/Day · 6 Scans max)</option>
-              <option value="7">7 Days Pass (1 Scan/Day · 7 Scans max)</option>
+              <option value="1">1 Day (1 Ticket Pass)</option>
+              <option value="2" selected>2 Days (2 Passes: Day 1 &amp; Day 2)</option>
+              <option value="3">3 Days (3 Passes: Day 1, 2, 3)</option>
+              <option value="4">4 Days (4 Passes: Day 1 to 4)</option>
+              <option value="5">5 Days (5 Passes: Day 1 to 5)</option>
+              <option value="6">6 Days (6 Passes: Day 1 to 6)</option>
+              <option value="7">7 Days (7 Passes: Day 1 to 7)</option>
             </select>
           </label>
           <label>Phone number
@@ -453,13 +453,13 @@
       <form id="bulk-form" class="admin-form">
         <label>Event Duration / Ticket Validity (Days)
           <select id="bulk-days-select" name="days">
-            <option value="1">1 Day Pass (1 Scan allowed)</option>
-            <option value="2" selected>2 Days Pass (1 Scan/Day · 2 Scans max)</option>
-            <option value="3">3 Days Pass (1 Scan/Day · 3 Scans max)</option>
-            <option value="4">4 Days Pass (1 Scan/Day · 4 Scans max)</option>
-            <option value="5">5 Days Pass (1 Scan/Day · 5 Scans max)</option>
-            <option value="6">6 Days Pass (1 Scan/Day · 6 Scans max)</option>
-            <option value="7">7 Days Pass (1 Scan/Day · 7 Scans max)</option>
+            <option value="1">1 Day (1 Ticket Pass per participant)</option>
+            <option value="2" selected>2 Days (2 Passes: Day 1 &amp; Day 2)</option>
+            <option value="3">3 Days (3 Passes: Day 1, 2, 3)</option>
+            <option value="4">4 Days (4 Passes: Day 1 to 4)</option>
+            <option value="5">5 Days (5 Passes: Day 1 to 5)</option>
+            <option value="6">6 Days (6 Passes: Day 1 to 6)</option>
+            <option value="7">7 Days (7 Passes: Day 1 to 7)</option>
           </select>
         </label>
         <label>Student Names (One per line) *
@@ -484,13 +484,13 @@
       <form id="duration-form" class="admin-form">
         <label>Default Event Days
           <select id="setting-duration-select">
-            <option value="1">1 Day (1 entry total)</option>
-            <option value="2">2 Days (1 entry per day · 2 entries total)</option>
-            <option value="3">3 Days (1 entry per day · 3 entries total)</option>
-            <option value="4">4 Days (1 entry per day · 4 entries total)</option>
-            <option value="5">5 Days (1 entry per day · 5 entries total)</option>
-            <option value="6">6 Days (1 entry per day · 6 entries total)</option>
-            <option value="7">7 Days (1 entry per day · 7 entries total)</option>
+            <option value="1">1 Day (1 Ticket Pass per participant)</option>
+            <option value="2">2 Days (2 Passes per participant: Day 1 &amp; Day 2)</option>
+            <option value="3">3 Days (3 Passes per participant: Day 1, 2, 3)</option>
+            <option value="4">4 Days (4 Passes per participant: Day 1 to 4)</option>
+            <option value="5">5 Days (5 Passes per participant: Day 1 to 5)</option>
+            <option value="6">6 Days (6 Passes per participant: Day 1 to 6)</option>
+            <option value="7">7 Days (7 Passes per participant: Day 1 to 7)</option>
           </select>
         </label>
         <div id="duration-form-msg" class="inline-error" style="display:none;" role="status"></div>
@@ -513,7 +513,7 @@
 
       <div class="modal-actions" style="margin-top: 1.5rem; justify-content: space-between;">
         <button type="button" class="admin-button admin-button-light" id="close-passes-btn">Close</button>
-        <button type="button" class="admin-button admin-button-primary" id="print-both-passes-btn">Print Both Passes <span>🖨️</span></button>
+        <button type="button" class="admin-button admin-button-primary" id="print-both-passes-btn">Print Passes <span>🖨️</span></button>
       </div>
     </section>
   </div>

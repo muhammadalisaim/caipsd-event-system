@@ -90,9 +90,8 @@ async function loadTicket() {
     document.getElementById('ticket-name').textContent = t.full_name;
     const until = new Date(t.valid_until);
     document.getElementById('ticket-date').textContent = until.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
-    const isDay2 = /\(Day\s*2\)/i.test(t.full_name || '');
-    const isDay1 = /\(Day\s*1\)/i.test(t.full_name || '');
-    const entryText = isDay2 ? 'Day 2 Pass · Single Entry' : (isDay1 ? 'Day 1 Pass · Single Entry' : 'Admit one · Single Entry');
+    const dayMatch = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
+    const entryText = dayMatch ? `Day ${dayMatch[1]} Pass · Single Entry` : 'Admit one · Single Entry';
     document.getElementById('ticket-venue').textContent = entryText;
     document.getElementById('ticket-code').textContent = t.ticket_code;
     document.getElementById('ticket-serial').textContent = `CAIPSD · ${t.ticket_code}`;
