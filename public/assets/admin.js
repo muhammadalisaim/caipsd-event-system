@@ -2250,6 +2250,7 @@ function showCheckinResult(type, message, ticket = null, extra = '') {
     </div>`;
 }
 let isCheckinInProgress = false;
+let readerPlaceholderHtml = '';
 async function performCheckin(ticketCode) {
   if (isCheckinInProgress) return;
   const cleaned = extractTicketCode(ticketCode);
@@ -2258,6 +2259,13 @@ async function performCheckin(ticketCode) {
     return;
   }
   isCheckinInProgress = true;
+  const verifyBtn = $('#manual-checkin-form button[type="submit"]');
+  const startBtn = $('#start-scanner');
+  const fileBtn = $('#btn-scan-file');
+  if (verifyBtn) verifyBtn.disabled = true;
+  if (startBtn) startBtn.disabled = true;
+  if (fileBtn) fileBtn.disabled = true;
+
   const activeDay = $('#scanner-active-day') ? $('#scanner-active-day').value : 'auto';
   const note = $('#scanner-message');
   note.textContent = 'Verifying ticket…';
@@ -2317,6 +2325,9 @@ async function performCheckin(ticketCode) {
     note.className = (isDayEarly || isAlreadyUsed) ? 'scanner-message warning' : 'scanner-message error';
   } finally {
     isCheckinInProgress = false;
+    if (verifyBtn) verifyBtn.disabled = false;
+    if (startBtn && !scannerRunning) startBtn.disabled = false;
+    if (fileBtn) fileBtn.disabled = false;
   }
 }
 $('#manual-checkin-form').addEventListener('submit', async (event) => {
@@ -2326,29 +2337,120 @@ $('#manual-checkin-form').addEventListener('submit', async (event) => {
 
 async function startScanner() {
   if (scannerRunning) return;
+  const msg = $('#scanner-message');
+  const startBtn = $('#start-scanner');
+  const stopBtn = $('#stop-scanner');
+
   if (typeof Html5Qrcode === 'undefined') {
-    $('#scanner-message').textContent = 'The camera scanner library could not load. Use manual ticket ID check-in instead.';
-    $('#scanner-message').className = 'scanner-message error'; return;
+    msg.textContent = 'The camera scanner library could not load. Use manual ticket ID or "Upload / Snap Photo" instead.';
+    msg.className = 'scanner-message error';
+    return;
   }
+
+  // Cache initial standby placeholder HTML
+  const readerEl = $('#reader');
+  if (readerEl && !readerPlaceholderHtml && readerEl.querySelector('.reader-placeholder')) {
+    readerPlaceholderHtml = readerEl.innerHTML;
+  }
+
+  // Check Secure Context on iPhone/iOS
+  if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    msg.innerHTML = '<strong>HTTPS Required on iOS/iPhone:</strong> Apple WebKit blocks live camera streams over unencrypted HTTP.<br>Please open the HTTPS URL (<a href="https://muhammadalisaim.github.io/caipsd-event-system/" target="_blank" style="color:var(--gold-text);text-decoration:underline;">GitHub Pages link</a>) or use <strong>"Upload / Snap Photo"</strong> below.';
+    msg.className = 'scanner-message warning';
+    return;
+  }
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    msg.textContent = 'Live camera stream is not supported in this browser. Please use "Upload / Snap Photo" or manual ticket ID check-in.';
+    msg.className = 'scanner-message error';
+    return;
+  }
+
   try {
-    if (!html5Scanner) html5Scanner = new Html5Qrcode('reader');
-    $('#start-scanner').disabled = true; $('#scanner-message').textContent = 'Requesting camera access…';
-    await html5Scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 210, height: 210 }, aspectRatio: 1 }, async (decodedText) => {
+    startBtn.disabled = true;
+    msg.textContent = 'Requesting camera access…';
+    msg.className = 'scanner-message';
+
+    if (!html5Scanner) {
+      html5Scanner = new Html5Qrcode('reader', {
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        },
+        verbose: false
+      });
+    }
+
+    // Smart Camera Selection for iOS / Android / Desktop
+    let cameraConfig = { facingMode: 'environment' };
+    try {
+      const devices = await Html5Qrcode.getCameras();
+      if (devices && devices.length > 0) {
+        const backCam = devices.find((d) => /back|rear|environment|wide|triple|dual/i.test(d.label || ''));
+        if (backCam) {
+          cameraConfig = { deviceId: { exact: backCam.id } };
+        } else if (devices.length > 1) {
+          cameraConfig = { deviceId: { exact: devices[devices.length - 1].id } };
+        } else {
+          cameraConfig = { deviceId: { exact: devices[0].id } };
+        }
+      }
+    } catch (eEnum) {
+      console.warn('Camera enumeration fallback:', eEnum);
+      cameraConfig = { facingMode: 'environment' };
+    }
+
+    const scannerConfig = {
+      fps: 12,
+      qrbox: (viewfinderWidth, viewfinderHeight) => {
+        const edge = Math.min(viewfinderWidth, viewfinderHeight);
+        const boxSize = Math.max(160, Math.floor(edge * 0.72));
+        return { width: boxSize, height: boxSize };
+      }
+    };
+
+    const onScanSuccess = async (decodedText) => {
       if (isCheckinInProgress) return;
-      $('#scanner-message').textContent = 'Ticket detected. Verifying…';
+      msg.textContent = 'Ticket detected. Verifying…';
       await stopScanner();
       await performCheckin(decodedText);
-    }, () => {});
+    };
+
+    try {
+      await html5Scanner.start(cameraConfig, scannerConfig, onScanSuccess, () => {});
+    } catch (startErr) {
+      console.warn('First camera attempt failed, trying fallback facingMode...', startErr);
+      try {
+        await html5Scanner.start({ facingMode: 'environment' }, scannerConfig, onScanSuccess, () => {});
+      } catch (errEnv) {
+        console.warn('Environment facingMode failed, trying user camera...', errEnv);
+        await html5Scanner.start({ facingMode: 'user' }, scannerConfig, onScanSuccess, () => {});
+      }
+    }
+
     scannerRunning = true;
-    $('#start-scanner').disabled = true; $('#stop-scanner').disabled = false;
-    $('#scanner-message').textContent = 'Camera is active. Hold the QR code inside the frame.';
-    $('#scanner-message').className = 'scanner-message';
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    msg.textContent = 'Camera is active. Hold the QR code inside the frame.';
+    msg.className = 'scanner-message success';
   } catch (error) {
-    $('#scanner-message').textContent = error?.message || 'Unable to start the camera. Check camera permissions or use manual check-in.';
-    $('#scanner-message').className = 'scanner-message error';
-    $('#start-scanner').disabled = false; $('#stop-scanner').disabled = true;
+    console.error('Camera startup error:', error);
+    let friendly = error?.message || 'Unable to access the camera.';
+    if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
+      friendly = 'Camera permission was denied. On iPhone, open Settings > Safari > Camera and choose "Allow", or use "Upload / Snap Photo" below.';
+    } else if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') {
+      friendly = 'No camera hardware found on this device. Please use manual ticket ID check-in.';
+    } else if (error?.name === 'NotReadableError' || error?.name === 'TrackStartError') {
+      friendly = 'Camera is busy or in use by another app. Close other apps or restart Safari, or use "Upload / Snap Photo" below.';
+    } else if (error?.name === 'OverconstrainedError') {
+      friendly = 'Camera resolution constraint error. Please try again or use "Upload / Snap Photo".';
+    }
+    msg.textContent = friendly;
+    msg.className = 'scanner-message error';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
   }
 }
+
 async function stopScanner() {
   if (html5Scanner && scannerRunning) {
     try { await html5Scanner.stop(); } catch (error) { console.warn('Scanner stop:', error); }
@@ -2357,9 +2459,47 @@ async function stopScanner() {
   scannerRunning = false;
   if ($('#start-scanner')) $('#start-scanner').disabled = false;
   if ($('#stop-scanner')) $('#stop-scanner').disabled = true;
+
+  const readerEl = $('#reader');
+  if (readerEl && readerPlaceholderHtml && !readerEl.querySelector('.reader-placeholder')) {
+    readerEl.innerHTML = readerPlaceholderHtml;
+  }
 }
-$('#start-scanner').addEventListener('click', startScanner);
-$('#stop-scanner').addEventListener('click', stopScanner);
+
+async function handleFileScan(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const msg = $('#scanner-message');
+  msg.textContent = 'Processing QR image…';
+  msg.className = 'scanner-message';
+
+  try {
+    if (scannerRunning) await stopScanner();
+    if (!html5Scanner) {
+      html5Scanner = new Html5Qrcode('reader', {
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+      });
+    }
+    const decodedText = await html5Scanner.scanFile(file, false);
+    msg.textContent = 'Ticket QR decoded successfully. Verifying…';
+    msg.className = 'scanner-message success';
+    await performCheckin(decodedText);
+  } catch (err) {
+    console.error('File scan error:', err);
+    msg.textContent = 'Could not find a valid QR code in the image. Please take a clearer, well-lit photo of the QR pass.';
+    msg.className = 'scanner-message error';
+  } finally {
+    event.target.value = '';
+  }
+}
+
+$('#start-scanner')?.addEventListener('click', startScanner);
+$('#stop-scanner')?.addEventListener('click', stopScanner);
+$('#btn-scan-file')?.addEventListener('click', () => {
+  $('#qr-file-input')?.click();
+});
+$('#qr-file-input')?.addEventListener('change', handleFileScan);
 
 async function triggerSheetsSync() {
   toast('Syncing tickets with Google Sheet…');

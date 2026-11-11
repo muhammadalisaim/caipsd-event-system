@@ -51,10 +51,16 @@ class SQLiteSessionStore extends session.Store {
       const row = db.prepare('SELECT sess, expired FROM sessions WHERE sid = ?').get(sid);
       if (!row) return callback(null, null);
       if (row.expired <= Date.now()) {
-        db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid);
+        try { db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid); } catch {}
         return callback(null, null);
       }
-      callback(null, JSON.parse(row.sess));
+      try {
+        const parsed = JSON.parse(row.sess);
+        callback(null, parsed);
+      } catch (parseErr) {
+        try { db.prepare('DELETE FROM sessions WHERE sid = ?').run(sid); } catch {}
+        callback(null, null);
+      }
     } catch (error) { callback(error); }
   }
   set(sid, sess, callback = () => {}) {
@@ -91,14 +97,15 @@ app.use((req, res, next) => {
 });
 
 app.use(helmet({
-  permissionsPolicy: { features: { camera: ['self'] } },
+  permissionsPolicy: { features: { camera: ["'self'"] } },
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      imgSrc: ["'self'", 'data:', 'blob:'],
-      connectSrc: ["'self'", 'https://script.google.com', 'https://script.googleusercontent.com', 'https://docs.google.com'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://api.qrserver.com', 'https://quickchart.io'],
+      mediaSrc: ["'self'", 'blob:'],
+      connectSrc: ["'self'", 'https://script.google.com', 'https://script.googleusercontent.com', 'https://docs.google.com', 'https://api.qrserver.com', 'https://quickchart.io'],
       fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
       workerSrc: ["'self'", 'blob:'],
       objectSrc: ["'none'"],
@@ -900,7 +907,13 @@ app.use((error, req, res, next) => {
 });
 
 function purgeExpiredSessions() {
-  try { db.prepare('DELETE FROM sessions WHERE expired <= ?').run(Date.now()); } catch (error) { console.error('Session cleanup failed:', error); }
+  try {
+    db.prepare('DELETE FROM sessions WHERE expired <= ?').run(Date.now());
+  } catch (error) {
+    if (error && error.code !== 'SQLITE_READONLY') {
+      console.error('Session cleanup failed:', error.message);
+    }
+  }
 }
 
 function start() {

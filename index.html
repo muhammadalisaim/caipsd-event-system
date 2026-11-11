@@ -160,6 +160,15 @@
                     </svg>
                     <span>Start Camera Scanner</span>
                   </button>
+                  <button id="btn-scan-file" class="btn-camera-file" type="button" title="Upload QR image or snap with iPhone camera">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                      <circle cx="8.5" cy="8.5" r="1.5"/>
+                      <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                    <span>Upload / Snap Photo</span>
+                  </button>
+                  <input type="file" id="qr-file-input" accept="image/*" capture="environment" style="display:none;" />
                   <button id="stop-scanner" class="btn-camera-stop" type="button" disabled>
                     <span>Stop</span>
                   </button>
