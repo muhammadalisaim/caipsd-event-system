@@ -42,10 +42,10 @@ function escapeHtml(value) {
  * ==============================================================================
  * STEP 1: SELECT "authorizeAndSendTestEmail" IN DROPDOWN AND CLICK "RUN" ▶️
  * ==============================================================================
- * Is function ko Apps Script editor mein 1 bar "Run" (▶️) karein.
- * Google aap se "Authorization Required" maangay ga:
- * Review Permissions -> Apna Google Account select karein -> Advanced -> Go to ... (unsafe) -> Allow.
- * Is se foran aapke inbox mein test email aa jayegi aur email permission active ho jayegi!
+ * Run this function once in the Apps Script editor by clicking "Run" (▶️).
+ * Google will prompt for "Authorization Required":
+ * Review Permissions -> Select your Google Account -> Advanced -> Go to ... (unsafe) -> Allow.
+ * This will send a confirmation test email to your inbox and activate email permissions.
  */
 function authorizeAndSendTestEmail() {
   var ss = getSpreadsheet();
@@ -55,8 +55,8 @@ function authorizeAndSendTestEmail() {
     subject: "CAIPSD Event System - Google Mail Activated Successfully!",
     htmlBody: "<div style='font-family:Arial,sans-serif;padding:24px;border:1px solid #e2e8f0;border-left:6px solid #22c55e;border-radius:8px;max-width:520px;'>" +
       "<h2 style='color:#1c304e;margin-top:0;'>✓ Google Mail Permission Granted!</h2>" +
-      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Aapka Google Account tickets aur QR passes send karne ke liye authorize ho chuka hai.</p>" +
-      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Ab aap CAIPSD portal par ja kar kisi bhi student ko 1-click se ticket email kar sakte hain.</p>" +
+      "<p style='color:#334155;font-size:14px;line-height:1.6;'>Your Google Account has been authorized to send tickets and QR passes.</p>" +
+      "<p style='color:#334155;font-size:14px;line-height:1.6;'>You can now send ticket emails to students with 1 click from the CAIPSD portal.</p>" +
       "<div style='margin-top:16px;padding:10px 14px;background:#f8fafc;border-radius:6px;font-size:12px;color:#64748b;'>CAIPSD Event Management — The Islamia University of Bahawalpur</div>" +
       "</div>"
   });
@@ -337,7 +337,7 @@ function doPost(e) {
                 status: 'already_used',
                 alreadyUsed: true,
                 alreadyScannedToday: true,
-                message: 'Already used ticket! 1 din mein sirf 1 bar entry allowed hai. Next day dobara scan ho sakega.',
+                message: 'Already used ticket! Only 1 entry is allowed per day (Entry Denied).',
                 entries: existingEntries
               });
             }

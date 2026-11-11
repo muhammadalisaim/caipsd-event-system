@@ -595,10 +595,10 @@ async function handleCheckinRequest(req, res, next) {
 
     const maxDays = Number(ticket.max_days) || 1;
 
-    // 1. Total entries limit: 1 ticket sirf 1 bar he use ho sakta hai
+    // 1. Total entries limit: 1 ticket can only be used once
     if (ticket.entry_count >= maxDays) {
       return res.status(409).json({
-        error: 'Already used ticket! Yeh ticket pehle hi use ho chuka hai (Entry Denied).',
+        error: 'Already used ticket! This ticket has already been used (Entry Denied).',
         alreadyUsed: true,
         limitReached: true,
         maxDays,
@@ -640,7 +640,7 @@ async function handleCheckinRequest(req, res, next) {
 
     if (currentEventDay < passDay) {
       return res.status(409).json({
-        error: `Day ${passDay} Ticket! Yeh ticket sirf Day ${passDay} par use ho sakta hai (Entry Denied).`,
+        error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`,
         alreadyUsed: false,
         day2Early: passDay === 2,
         dayEarly: true,
@@ -653,7 +653,7 @@ async function handleCheckinRequest(req, res, next) {
 
     if (dayMatch && passDay < currentEventDay) {
       return res.status(409).json({
-        error: `Day ${passDay} Ticket! Yeh ticket Day ${passDay} ke liye tha (Entry Denied).`,
+        error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`,
         alreadyUsed: (ticket.entry_count || 0) > 0,
         dayExpired: true,
         passDay,
@@ -682,7 +682,7 @@ async function handleCheckinRequest(req, res, next) {
 
     if (alreadyScannedToday) {
       return res.status(409).json({
-        error: 'Already used ticket! Yeh ticket aaj pehle hi use ho chuka hai (Entry Denied).',
+        error: 'Already used ticket! This ticket has already been used today (Entry Denied).',
         alreadyUsed: true,
         alreadyScannedToday: true,
         maxDays,

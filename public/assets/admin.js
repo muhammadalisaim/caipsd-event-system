@@ -906,7 +906,7 @@ async function handleStaticApi(url, options = {}) {
 
     const maxDays = Number(t.max_days) || 1;
     if ((t.entry_count || 0) >= maxDays) {
-      const err = new Error('Already used ticket! Yeh ticket 1 bar use ho chuki hai (Entry Denied).');
+      const err = new Error('Already used ticket! This ticket has already been used (Entry Denied).');
       err.status = 409;
       err.data = { ticket: t, limitReached: true, alreadyUsed: true, maxDays };
       throw err;
@@ -948,14 +948,14 @@ async function handleStaticApi(url, options = {}) {
     }
 
     if (currentEventDay < passDay) {
-      const err = new Error(`Day ${passDay} Ticket! Yeh ticket sirf Day ${passDay} par use ho sakta hai (Entry Denied).`);
+      const err = new Error(`Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`);
       err.status = 409;
       err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay, alreadyUsed: false, maxDays };
       throw err;
     }
 
     if (dayMatch && passDay < currentEventDay) {
-      const err = new Error(`Day ${passDay} Ticket! Yeh ticket Day ${passDay} ke liye tha (Entry Denied).`);
+      const err = new Error(`Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`);
       err.status = 409;
       err.data = { ticket: t, dayExpired: true, passDay, currentEventDay, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
       throw err;
@@ -969,7 +969,7 @@ async function handleStaticApi(url, options = {}) {
     );
 
     if (alreadyUsedToday) {
-      const err = new Error('Already used ticket! Yeh ticket 1 bar use ho chuki hai (Entry Denied).');
+      const err = new Error('Already used ticket! This ticket has already been used today (Entry Denied).');
       err.status = 409;
       err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
       throw err;
@@ -993,7 +993,7 @@ async function handleStaticApi(url, options = {}) {
       if (sheetRes && (sheetRes.status === 'already_used' || sheetRes.alreadyUsed)) {
         t.entry_count = Math.max(0, t.entry_count - 1);
         saveLocalTickets(list);
-        const err = new Error(sheetRes.message || 'Already used ticket! 1 din mein sirf 1 bar entry allowed hai. Next day dobara scan ho sakega.');
+        const err = new Error(sheetRes.message || 'Already used ticket! Only 1 entry is allowed per day (Entry Denied).');
         err.status = 409;
         err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
         throw err;
@@ -2277,12 +2277,20 @@ async function performCheckin(ticketCode) {
   } catch (error) {
     const isDayEarly = Boolean(
       (error.data && (error.data.dayEarly || error.data.day2Early)) ||
-      (error.message && error.message.includes('Ticket!') && error.message.includes('sirf Day'))
+      (error.message && error.message.includes('Ticket!') && (error.message.includes('can only be used on') || error.message.includes('sirf Day')))
     );
     const earlyDayNum = (error.data && error.data.passDay) || ((error.message || '').match(/Day\s*(\d+)/i)?.[1]) || '2';
     const isAlreadyUsed = !isDayEarly && Boolean(
       (error.data && (error.data.alreadyUsed || error.data.alreadyScannedToday || error.data.limitReached)) ||
-      (error.message && (error.message.includes('already used') || error.message.includes('Already used') || error.message.includes('use ho chuk') || error.message.includes('pehle hi use') || error.message.includes('limit reached')))
+      (error.message && (
+        error.message.includes('already used') ||
+        error.message.includes('Already used') ||
+        error.message.includes('already been used') ||
+        error.message.includes('already been scanned') ||
+        error.message.includes('use ho chuk') ||
+        error.message.includes('pehle hi use') ||
+        error.message.includes('limit reached')
+      ))
     );
     let displayHeadline;
     let badgeText;
@@ -2291,11 +2299,13 @@ async function performCheckin(ticketCode) {
     if (isDayEarly) {
       displayHeadline = `Day ${earlyDayNum} Ticket! (Entry Denied)`;
       badgeText = `DAY ${earlyDayNum} TICKET · NOT ALLOWED TODAY`;
-      toast(`⚠ Day ${earlyDayNum} Ticket: Yeh ticket sirf Day ${earlyDayNum} par use ho sakta hai (Entry Denied).`, 'error');
+      noteText = `Day ${earlyDayNum} Ticket! This ticket can only be used on Day ${earlyDayNum} (Entry Denied).`;
+      toast(`⚠ Day ${earlyDayNum} Ticket: This ticket can only be used on Day ${earlyDayNum} (Entry Denied).`, 'error');
     } else if (isAlreadyUsed) {
       displayHeadline = 'Already used ticket! (Entry Denied)';
       badgeText = 'ALREADY USED TICKET · ENTRY DENIED';
-      toast('⚠ Already used ticket! Yeh ticket 1 bar use ho chuki hai (Entry Denied).', 'error');
+      noteText = 'Already used ticket! This ticket has already been used (Entry Denied).';
+      toast('⚠ Already used ticket! This ticket has already been used (Entry Denied).', 'error');
     } else {
       displayHeadline = error.message;
       badgeText = '';
