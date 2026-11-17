@@ -543,6 +543,26 @@
       </div>
     </section>
   </div>
+
+  <div id="sheet-password-modal" class="admin-modal-backdrop" hidden>
+    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="sheet-password-modal-title" style="max-width: 440px;">
+      <button class="admin-modal-close" id="close-sheet-password-modal" aria-label="Close">×</button>
+      <div class="admin-kicker">SECURITY CHECK</div>
+      <h2 id="sheet-password-modal-title">Google Sheet <em>Locked.</em></h2>
+      <p class="modal-subcopy">Enter the authorized password to access the live Google Spreadsheet.</p>
+      <form id="sheet-password-form" class="admin-form">
+        <label>
+          <span class="form-label-title">Password</span>
+          <input type="password" id="input-sheet-password" placeholder="Enter password…" autocomplete="current-password" required />
+        </label>
+        <div id="sheet-password-error" class="inline-error" style="display:none;"></div>
+        <div class="modal-actions" style="margin-top: 10px;">
+          <button type="button" class="admin-button admin-button-secondary" id="cancel-sheet-password-modal">Cancel</button>
+          <button type="submit" class="admin-button admin-button-primary">🔓 Unlock &amp; Open</button>
+        </div>
+      </form>
+    </section>
+  </div>
   <script src="/vendor/html5-qrcode/html5-qrcode.min.js" defer></script>
   <script src="/assets/admin.js?v=2.4.0" defer></script>
 </body>

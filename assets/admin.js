@@ -2120,6 +2120,70 @@ function printBothPasses() {
 
 $('#print-both-passes-btn')?.addEventListener('click', printBothPasses);
 
+/* ---- Google Sheet Password Protection Modal ---- */
+const sheetPasswordModal = $('#sheet-password-modal');
+const sheetPasswordForm = $('#sheet-password-form');
+const inputSheetPassword = $('#input-sheet-password');
+const sheetPasswordError = $('#sheet-password-error');
+let pendingSheetUrl = 'https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit';
+
+function openSheetPasswordModal(targetUrl) {
+  pendingSheetUrl = targetUrl || pendingSheetUrl;
+  lastFocused = document.activeElement;
+  if (sheetPasswordForm) sheetPasswordForm.reset();
+  if (sheetPasswordError) {
+    sheetPasswordError.textContent = '';
+    sheetPasswordError.style.display = 'none';
+  }
+  if (sheetPasswordModal) sheetPasswordModal.hidden = false;
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => inputSheetPassword?.focus(), 50);
+}
+
+function closeSheetPasswordModal() {
+  if (sheetPasswordModal) sheetPasswordModal.hidden = true;
+  document.body.style.overflow = '';
+  if (sheetPasswordForm) sheetPasswordForm.reset();
+  if (sheetPasswordError) {
+    sheetPasswordError.textContent = '';
+    sheetPasswordError.style.display = 'none';
+  }
+  if (lastFocused && lastFocused.focus) lastFocused.focus();
+}
+
+$('#close-sheet-password-modal')?.addEventListener('click', closeSheetPasswordModal);
+$('#cancel-sheet-password-modal')?.addEventListener('click', closeSheetPasswordModal);
+sheetPasswordModal?.addEventListener('click', (event) => {
+  if (event.target === sheetPasswordModal) closeSheetPasswordModal();
+});
+
+sheetPasswordForm?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const entered = String(inputSheetPassword?.value || '').trim();
+  const correctPassword = 'Event@2211';
+  if (entered !== correctPassword) {
+    if (sheetPasswordError) {
+      sheetPasswordError.textContent = '❌ Incorrect password! Access denied.';
+      sheetPasswordError.style.display = 'block';
+    }
+    inputSheetPassword?.focus();
+    inputSheetPassword?.select();
+    return;
+  }
+  closeSheetPasswordModal();
+  toast('✓ Password verified! Opening Google Sheet…');
+  window.open(pendingSheetUrl, '_blank', 'noopener');
+});
+
+// Intercept all Google Sheet links across the admin portal
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('a[href*="docs.google.com/spreadsheets"]');
+  if (link) {
+    e.preventDefault();
+    openSheetPasswordModal(link.href);
+  }
+});
+
 /* ---- Google Mail Modal ---- */
 const mailModal = $('#mail-modal');
 async function openMailModal() {
@@ -2375,7 +2439,7 @@ $('#email-all-form')?.addEventListener('submit', async (event) => {
 
 /* Modal keyboard accessibility */
 document.addEventListener('keydown', (event) => {
-  const activeModal = [ticketModal, bulkModal, durationModal, mailModal, emailAllModal, viewPassesModal].find((m) => m && !m.hidden);
+  const activeModal = [ticketModal, bulkModal, durationModal, mailModal, emailAllModal, viewPassesModal, sheetPasswordModal].find((m) => m && !m.hidden);
   if (!activeModal) return;
   if (event.key === 'Escape') {
     if (activeModal === ticketModal) closeTicketModal();
@@ -2384,6 +2448,7 @@ document.addEventListener('keydown', (event) => {
     else if (activeModal === mailModal) closeMailModal();
     else if (activeModal === emailAllModal) closeEmailAllModal();
     else if (activeModal === viewPassesModal) closePassesModal();
+    else if (activeModal === sheetPasswordModal) closeSheetPasswordModal();
     return;
   }
   if (event.key !== 'Tab') return;
