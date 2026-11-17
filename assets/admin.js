@@ -1139,7 +1139,15 @@ async function api(url, options = {}) {
   if (isStaticHost) {
     return handleStaticApi(url, options);
   }
-  const response = await fetch(url, { credentials: 'same-origin', ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(options.headers || {}) } });
+  const response = await fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    }
+  });
   let data = {};
   try { data = await response.json(); } catch { /* download or empty body */ }
   if (!response.ok) {

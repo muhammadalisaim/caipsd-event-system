@@ -67,10 +67,16 @@ db.exec(`
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS cancelled_tickets (
+    ticket_code TEXT PRIMARY KEY,
+    cancelled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE INDEX IF NOT EXISTS idx_tickets_code ON tickets(ticket_code);
   CREATE INDEX IF NOT EXISTS idx_tickets_valid ON tickets(valid_until);
   CREATE INDEX IF NOT EXISTS idx_entries_ticket ON entries(ticket_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
+  CREATE INDEX IF NOT EXISTS idx_cancelled_tickets_code ON cancelled_tickets(ticket_code);
 `);
 
 // Migration: add max_days column if missing
@@ -158,4 +164,46 @@ function deleteSetting(key) {
   } catch { /* ignore */ }
 }
 
-module.exports = { db, initializeAdmin, getSetting, setSetting, deleteSetting };
+let stmtIsCancelled;
+let stmtRecordCancelled;
+
+function isTicketCancelled(code) {
+  if (!code) return false;
+  try {
+    if (!stmtIsCancelled) stmtIsCancelled = db.prepare('SELECT 1 FROM cancelled_tickets WHERE ticket_code = ?');
+    return Boolean(stmtIsCancelled.get(String(code).toUpperCase()));
+  } catch {
+    return false;
+  }
+}
+
+function recordTicketCancelled(code) {
+  if (!code) return;
+  try {
+    if (!stmtRecordCancelled) {
+      stmtRecordCancelled = db.prepare(`
+        INSERT INTO cancelled_tickets (ticket_code, cancelled_at)
+        VALUES (?, CURRENT_TIMESTAMP)
+        ON CONFLICT(ticket_code) DO NOTHING
+      `);
+    }
+    stmtRecordCancelled.run(String(code).toUpperCase());
+  } catch {}
+}
+
+function updateAdminPassword(email, newPasswordHash) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  return db.prepare('UPDATE admins SET password_hash = ? WHERE email = ?').run(newPasswordHash, normalizedEmail);
+}
+
+module.exports = {
+  db,
+  initializeAdmin,
+  getSetting,
+  setSetting,
+  deleteSetting,
+  isTicketCancelled,
+  recordTicketCancelled,
+  updateAdminPassword
+};
+

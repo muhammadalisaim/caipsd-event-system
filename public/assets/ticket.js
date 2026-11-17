@@ -77,7 +77,7 @@ function renderTicketCard(t, markSrc) {
       </div>
       <div class="ticket-qr-side">
         <div class="qr-frame">
-          <img src="${qrUrl}" alt="Ticket QR code for ${escapeHtml(t.ticket_code)}" />
+          <img src="${escapeHtml(qrUrl)}" alt="Ticket QR code for ${escapeHtml(t.ticket_code)}" />
         </div>
         <strong>Show this QR code</strong>
         <p>Present it at the entrance for quick check-in.</p>

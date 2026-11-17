@@ -330,3 +330,99 @@ test('issues tickets with explicit startDate and calculates daily event dates', 
   assert.equal(bulkRes.data.tickets[1].event_date, '2026-12-02');
 });
 
+test('security: input email validation rejects invalid email formats', async () => {
+  const badEmailRes = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Ali Test', email: 'not-a-valid-email' }
+  });
+  assert.equal(badEmailRes.status, 400);
+  assert.match(badEmailRes.data.error, /valid email/i);
+});
+
+test('security: CSRF origin verification blocks requests from unauthorized origins', async () => {
+  const evilRes = await fetch(base + '/api/admin/tickets', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+      Origin: 'https://evil-attacker-site.com'
+    },
+    body: JSON.stringify({ fullName: 'Malicious Attacker' })
+  });
+  assert.equal(evilRes.status, 403);
+  const data = await evilRes.json();
+  assert.match(data.error, /forbidden/i);
+});
+
+test('security: admin password change endpoint enforces authentication and validation', async () => {
+  // Unauthenticated attempt
+  const noAuth = await call('/api/admin/change-password', {
+    method: 'POST',
+    auth: false,
+    body: { currentPassword: 'TestPassword123!', newPassword: 'NewSecurePassword123!' }
+  });
+  assert.equal(noAuth.status, 401);
+
+  // Short new password (< 8 chars)
+  const shortPass = await call('/api/admin/change-password', {
+    method: 'POST',
+    body: { currentPassword: 'TestPassword123!', newPassword: 'short' }
+  });
+  assert.equal(shortPass.status, 400);
+
+  // Wrong current password
+  const wrongCurrent = await call('/api/admin/change-password', {
+    method: 'POST',
+    body: { currentPassword: 'WrongPassword!', newPassword: 'NewSecurePassword123!' }
+  });
+  assert.equal(wrongCurrent.status, 401);
+
+  // Successful change
+  const success = await call('/api/admin/change-password', {
+    method: 'POST',
+    body: { currentPassword: 'TestPassword123!', newPassword: 'NewSecurePassword123!' }
+  });
+  assert.equal(success.status, 200);
+
+  // Verify new password works for login
+  const loginNew = await call('/api/admin/login', {
+    method: 'POST',
+    auth: false,
+    body: { email: 'admin@test.org', password: 'NewSecurePassword123!' }
+  });
+  assert.equal(loginNew.status, 200);
+
+  // Revert password back to original test password
+  await call('/api/admin/change-password', {
+    method: 'POST',
+    body: { currentPassword: 'NewSecurePassword123!', newPassword: 'TestPassword123!' }
+  });
+});
+
+test('security: persistent cancellation prevents resurrection of deleted ticket', async () => {
+  const { isTicketCancelled } = require('../db');
+  // Issue a test ticket
+  const issueRes = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Cancel Check Attendee' }
+  });
+  assert.equal(issueRes.status, 201);
+  const tCode = issueRes.data.ticket.ticket_code;
+  const tId = issueRes.data.ticket.id;
+
+  // Cancel the ticket
+  const delRes = await call(`/api/admin/tickets/${tId}`, { method: 'DELETE' });
+  assert.equal(delRes.status, 200);
+
+  // Verify it is recorded in the permanent cancelled_tickets table
+  assert.equal(isTicketCancelled(tCode), true);
+
+  // Verify check-in is immediately denied
+  const checkinRes = await call('/api/admin/check-in', {
+    method: 'POST',
+    body: { ticketCode: tCode }
+  });
+  assert.equal(checkinRes.status, 404);
+});
+
+

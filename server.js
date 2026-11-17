@@ -7,7 +7,16 @@ const session = require('express-session');
 const helmet = require('helmet');
 const { rateLimit } = require('express-rate-limit');
 const QRCode = require('qrcode');
-const { db, initializeAdmin, getSetting, setSetting, deleteSetting } = require('./db');
+const {
+  db,
+  initializeAdmin,
+  getSetting,
+  setSetting,
+  deleteSetting,
+  isTicketCancelled,
+  recordTicketCancelled,
+  updateAdminPassword
+} = require('./db');
 const { mailConfigured, sendTicketEmail, sendTestEmail, fromAddress, getMailConfig, verifyMailConfig, createTransport } = require('./mailer');
 const {
   getSheetsConfig,
@@ -89,10 +98,28 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With');
     res.setHeader('Vary', 'Origin');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
+
+  // CSRF Defense: For state-changing requests, if Origin header is present, verify host match
+  if (['POST', 'DELETE', 'PUT', 'PATCH'].includes(req.method) && origin) {
+    try {
+      const originUrl = new URL(origin);
+      const host = (req.headers.host || '').toLowerCase();
+      const isSameHost = originUrl.host.toLowerCase() === host;
+      const isAllowed = ALLOWED_ORIGINS.some((allowed) => {
+        try { return new URL(allowed).origin === originUrl.origin; } catch { return false; }
+      });
+      if (!isSameHost && !isAllowed) {
+        return res.status(403).json({ error: 'Cross-origin request forbidden.' });
+      }
+    } catch {
+      return res.status(403).json({ error: 'Invalid origin header.' });
+    }
+  }
+
   next();
 });
 
@@ -109,6 +136,9 @@ app.use(helmet({
       fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
       workerSrc: ["'self'", 'blob:'],
       objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'self'"],
       upgradeInsecureRequests: isProduction ? [] : null
     }
   },
@@ -130,12 +160,18 @@ app.use(express.static(path.join(__dirname, 'public'), { maxAge: isProduction ? 
 const ticketLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests. Please try again shortly.' } });
 const checkinLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many scans from this device. Please wait a moment.' } });
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts. Please try again later.' } });
+const mailActionLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 25, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many email requests. Please wait a few minutes before trying again.' } });
 
 function requireAdmin(req, res, next) {
   if (!req.session || !req.session.adminId) return res.status(401).json({ error: 'Please sign in to continue.' });
   next();
 }
-function cleanText(value, max = 200) { return String(value ?? '').trim().slice(0, max); }
+function cleanText(value, max = 200) {
+  return String(value ?? '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .trim()
+    .slice(0, max);
+}
 function extractTicketCode(raw) {
   if (!raw) return '';
   const text = String(raw).trim();
@@ -171,7 +207,6 @@ function getEventDay1Date() {
   } catch {}
   return null;
 }
-const cancelledCodes = new Set();
 
 function ticketStatus(row, now = Date.now()) {
   if (new Date(row.valid_until).getTime() <= now) return 'expired';
@@ -298,11 +333,19 @@ app.get('/api/ticket/:code', ticketLimiter, async (req, res) => {
   }
 });
 
+const DUMMY_BCRYPT_HASH = '$2a$12$e80MvX9/i8Q8Z1GfE1uS.eYj7W/cM1kE8aK5qT2vH0pE4nL9vI7Ou';
+
 app.post('/api/admin/login', loginLimiter, (req, res) => {
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password ?? '');
   const admin = db.prepare('SELECT id, email, password_hash FROM admins WHERE email = ?').get(email);
-  if (!admin || !bcrypt.compareSync(password, admin.password_hash)) return res.status(401).json({ error: 'Email or password is incorrect.' });
+  const hashToCompare = admin ? admin.password_hash : DUMMY_BCRYPT_HASH;
+  const passwordMatches = bcrypt.compareSync(password, hashToCompare);
+
+  if (!admin || !passwordMatches) {
+    return res.status(401).json({ error: 'Email or password is incorrect.' });
+  }
+
   req.session.regenerate((error) => {
     if (error) return res.status(500).json({ error: 'Could not start a secure session.' });
     req.session.adminId = admin.id;
@@ -319,6 +362,37 @@ app.post('/api/admin/logout', requireAdmin, (req, res) => req.session.destroy((e
   res.clearCookie('caipsd.sid', { httpOnly: true, sameSite: 'lax', secure: isProduction });
   res.json({ message: 'Signed out.' });
 }));
+
+app.post('/api/admin/change-password', requireAdmin, (req, res) => {
+  const currentPassword = String(req.body.currentPassword ?? '');
+  const newPassword = String(req.body.newPassword ?? '');
+  const adminEmail = req.session.adminEmail;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Please provide both current and new password.' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+  }
+
+  const admin = db.prepare('SELECT id, email, password_hash FROM admins WHERE email = ?').get(adminEmail);
+  if (!admin || !bcrypt.compareSync(currentPassword, admin.password_hash)) {
+    return res.status(401).json({ error: 'Current password is incorrect.' });
+  }
+
+  const newHash = bcrypt.hashSync(newPassword, 12);
+  updateAdminPassword(adminEmail, newHash);
+
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Password updated, but session regeneration failed.' });
+    req.session.adminId = admin.id;
+    req.session.adminEmail = admin.email;
+    req.session.save((saveErr) => {
+      if (saveErr) return res.status(500).json({ error: 'Password updated, but could not save session.' });
+      res.json({ message: 'Password updated successfully.' });
+    });
+  });
+});
 
 app.get('/api/admin/config', requireAdmin, (req, res) => {
   const mailCfg = getMailConfig();
@@ -385,6 +459,9 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
     const days = Math.max(1, Math.min(30, Number(req.body.days || req.body.validDays || getDefaultValidDays())));
     if (!rawFullName || rawFullName.length < 2) {
       return res.status(400).json({ error: 'Please enter the participant full name.' });
+    }
+    if (email && !validEmail(email)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
     }
 
     const baseName = rawFullName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
@@ -507,7 +584,7 @@ app.post('/api/admin/tickets/:id/send', requireAdmin, async (req, res, next) => 
   } catch (error) { next(error); }
 });
 
-app.post('/api/admin/tickets/email-all', requireAdmin, async (req, res, next) => {
+app.post('/api/admin/tickets/email-all', requireAdmin, mailActionLimiter, async (req, res, next) => {
   try {
     if (!emailAvailable()) {
       return res.status(503).json({ error: 'Email is not configured. Please connect your Google / Gmail account in the portal.' });
@@ -551,7 +628,7 @@ app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid ticket.' });
   const existing = getTicketById(id);
   if (!existing) return res.status(404).json({ error: 'Ticket not found.' });
-  cancelledCodes.add(existing.ticket_code);
+  recordTicketCancelled(existing.ticket_code);
   const result = db.prepare('DELETE FROM tickets WHERE id = ?').run(id);
   if (!result.changes) return res.status(404).json({ error: 'Ticket not found.' });
   sheetsCancelTicket(existing.ticket_code).catch((err) => console.error('Sheet cancel error:', err.message));
@@ -563,7 +640,7 @@ async function handleCheckinRequest(req, res, next) {
     const code = extractTicketCode(req.body.ticketCode);
     const match = code.match(/^[A-F0-9]{16}$/);
     if (!match) return res.status(400).json({ error: 'Enter a valid ticket code or scan a CAIPSD ticket QR.' });
-    if (cancelledCodes.has(match[0])) {
+    if (isTicketCancelled(match[0])) {
       return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
     }
     let ticket = getTicketByCode(match[0]);
@@ -571,7 +648,7 @@ async function handleCheckinRequest(req, res, next) {
       try {
         const sheetTickets = await getSheetTicketsCached();
         const found = sheetTickets.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === match[0]);
-        if (found && sheetTicketCancelled(found)) {
+        if (found && (sheetTicketCancelled(found) || isTicketCancelled(match[0]))) {
           return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
         }
         if (found) {
@@ -857,7 +934,7 @@ app.post('/api/admin/mail/disconnect', requireAdmin, (req, res) => {
   res.json({ message: 'Google account disconnected successfully.' });
 });
 
-app.post('/api/admin/mail/test', requireAdmin, async (req, res, next) => {
+app.post('/api/admin/mail/test', requireAdmin, mailActionLimiter, async (req, res, next) => {
   try {
     const cfg = getMailConfig();
     const to = cleanText(req.body.to, 180) || cfg.user || req.session.adminEmail;
