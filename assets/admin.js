@@ -920,15 +920,21 @@ async function handleStaticApi(url, options = {}) {
       currentEventDay = Math.max(1, parseInt(body.activeDay, 10) || 1);
     } else {
       const todayStr = getLocalDateString(now);
-      let day1Date = null;
       if (t.event_date && /^\d{4}-\d{2}-\d{2}$/.test(t.event_date)) {
-        try {
-          const passDate = new Date(t.event_date + 'T00:00:00');
-          const d1Obj = new Date(passDate.getTime() - (passDay - 1) * 86400000);
-          day1Date = getLocalDateString(d1Obj);
-        } catch {}
-      }
-      if (!day1Date) {
+        if (todayStr < t.event_date) {
+          const err = new Error(`Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`);
+          err.status = 409;
+          err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay: 0, alreadyUsed: false, maxDays };
+          throw err;
+        }
+        if (todayStr > t.event_date) {
+          const err = new Error(`Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`);
+          err.status = 409;
+          err.data = { ticket: t, dayExpired: true, passDay, currentEventDay: 999, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
+          throw err;
+        }
+        currentEventDay = passDay;
+      } else {
         const issuedStr = getLocalDateString(new Date(t.issued_at));
         let earliestEntryDate = null;
         for (const item of list) {
@@ -937,14 +943,14 @@ async function handleStaticApi(url, options = {}) {
             if (!earliestEntryDate || ed < earliestEntryDate) earliestEntryDate = ed;
           }
         }
-        day1Date = earliestEntryDate || issuedStr;
+        const day1Date = earliestEntryDate || issuedStr;
+        try {
+          const d1 = new Date(day1Date + 'T00:00:00');
+          const dt = new Date(todayStr + 'T00:00:00');
+          const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
+          currentEventDay = Math.max(1, diffDays + 1);
+        } catch {}
       }
-      try {
-        const d1 = new Date(day1Date + 'T00:00:00');
-        const dt = new Date(todayStr + 'T00:00:00');
-        const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
-        currentEventDay = Math.max(1, diffDays + 1);
-      } catch {}
     }
 
     if (currentEventDay < passDay) {
@@ -2274,14 +2280,18 @@ async function performCheckin(ticketCode) {
   if (startBtn) startBtn.disabled = true;
   if (fileBtn) fileBtn.disabled = true;
 
-  const activeDay = $('#scanner-active-day') ? $('#scanner-active-day').value : 'auto';
+  const payload = { ticketCode: cleaned };
+  const daySelect = $('#scanner-active-day');
+  if (daySelect && daySelect.value && daySelect.value !== 'auto') {
+    payload.activeDay = daySelect.value;
+  }
   const note = $('#scanner-message');
   note.textContent = 'Verifying ticket…';
   note.className = 'scanner-message';
   try {
     const result = await api('/api/check-in', {
       method: 'POST',
-      body: JSON.stringify({ ticketCode: cleaned, activeDay })
+      body: JSON.stringify(payload)
     });
     const dayMatch = ((result.ticket && result.ticket.full_name) || '').match(/\(Day\s*(\d+)\)/i);
     const visitInfo = dayMatch ? `Day ${dayMatch[1]} Pass · Entry Recorded` : 'Entry Recorded';
@@ -2295,8 +2305,12 @@ async function performCheckin(ticketCode) {
       (error.data && (error.data.dayEarly || error.data.day2Early)) ||
       (error.message && error.message.includes('Ticket!') && (error.message.includes('can only be used on') || error.message.includes('sirf Day')))
     );
-    const earlyDayNum = (error.data && error.data.passDay) || ((error.message || '').match(/Day\s*(\d+)/i)?.[1]) || '2';
-    const isAlreadyUsed = !isDayEarly && Boolean(
+    const isDayExpired = Boolean(
+      (error.data && error.data.dayExpired) ||
+      (error.message && error.message.includes('Ticket!') && error.message.includes('was only valid for'))
+    );
+    const passDayNum = (error.data && error.data.passDay) || ((error.message || '').match(/Day\s*(\d+)/i)?.[1]) || '1';
+    const isAlreadyUsed = !isDayEarly && !isDayExpired && Boolean(
       (error.data && (error.data.alreadyUsed || error.data.alreadyScannedToday || error.data.limitReached)) ||
       (error.message && (
         error.message.includes('already used') ||
@@ -2313,10 +2327,15 @@ async function performCheckin(ticketCode) {
     let noteText = error.message;
 
     if (isDayEarly) {
-      displayHeadline = `Day ${earlyDayNum} Ticket! (Entry Denied)`;
-      badgeText = `DAY ${earlyDayNum} TICKET · NOT ALLOWED TODAY`;
-      noteText = `Day ${earlyDayNum} Ticket! This ticket can only be used on Day ${earlyDayNum} (Entry Denied).`;
-      toast(`⚠ Day ${earlyDayNum} Ticket: This ticket can only be used on Day ${earlyDayNum} (Entry Denied).`, 'error');
+      displayHeadline = `Day ${passDayNum} Ticket! (Entry Denied)`;
+      badgeText = `DAY ${passDayNum} TICKET · NOT ALLOWED TODAY`;
+      noteText = `Day ${passDayNum} Ticket! This ticket can only be used on Day ${passDayNum} (Entry Denied).`;
+      toast(`⚠ Day ${passDayNum} Ticket: This ticket can only be used on Day ${passDayNum} (Entry Denied).`, 'error');
+    } else if (isDayExpired) {
+      displayHeadline = `Day ${passDayNum} Ticket! (Entry Denied)`;
+      badgeText = `DAY ${passDayNum} TICKET · EXPIRED`;
+      noteText = `Day ${passDayNum} Ticket! This ticket was only valid for Day ${passDayNum} (Entry Denied).`;
+      toast(`⚠ Day ${passDayNum} Ticket: This ticket was only valid for Day ${passDayNum} (Entry Denied).`, 'error');
     } else if (isAlreadyUsed) {
       displayHeadline = 'Already used ticket! (Entry Denied)';
       badgeText = 'ALREADY USED TICKET · ENTRY DENIED';
@@ -2328,9 +2347,9 @@ async function performCheckin(ticketCode) {
       toast(error.message, 'error');
     }
 
-    showCheckinResult((isDayEarly || isAlreadyUsed) ? 'warning' : 'error', displayHeadline, error.data && error.data.ticket, badgeText);
+    showCheckinResult((isDayEarly || isDayExpired || isAlreadyUsed) ? 'warning' : 'error', displayHeadline, error.data && error.data.ticket, badgeText);
     note.textContent = noteText;
-    note.className = (isDayEarly || isAlreadyUsed) ? 'scanner-message warning' : 'scanner-message error';
+    note.className = (isDayEarly || isDayExpired || isAlreadyUsed) ? 'scanner-message warning' : 'scanner-message error';
   } finally {
     isCheckinInProgress = false;
     if (verifyBtn) verifyBtn.disabled = false;

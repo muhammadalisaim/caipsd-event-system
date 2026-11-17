@@ -111,7 +111,7 @@ test('gate check-in allows 1 scan on Day 1 and blocks Day 2 ticket on Day 1', as
 test('gate check-in allows Day 2 ticket on Day 2 and blocks repeated scan', async () => {
   // Simulate Day 1 was yesterday
   db.prepare('UPDATE entries SET scanned_at = ? WHERE ticket_id = ?').run(new Date(Date.now() - 86400000).toISOString(), ticketId);
-  db.prepare('UPDATE tickets SET issued_at = ? WHERE id = ?').run(new Date(Date.now() - 86400000).toISOString(), ticket2Id);
+  db.prepare('UPDATE tickets SET issued_at = ?, event_date = ? WHERE id = ?').run(new Date(Date.now() - 86400000).toISOString(), new Date().toISOString().slice(0, 10), ticket2Id);
 
   // Day 2 scan -> allowed
   const day2Scan = await call('/api/admin/check-in', { method: 'POST', body: { ticketCode: ticket2.ticket_code } });
@@ -424,5 +424,37 @@ test('security: persistent cancellation prevents resurrection of deleted ticket'
   });
   assert.equal(checkinRes.status, 404);
 });
+
+test('automatic day detection permits Day 1 today and denies Day 2 pass without activeDay parameter', async () => {
+  // Issue 2-day pass starting today
+  const issueRes = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Auto Detection Attendee', days: 2 }
+  });
+  assert.equal(issueRes.status, 201);
+  const tickets = issueRes.data.tickets;
+  assert.equal(tickets.length, 2);
+
+  const day1Ticket = tickets[0];
+  const day2Ticket = tickets[1];
+
+  // Check-in Day 1 ticket today without sending activeDay: should succeed automatically
+  const day1Checkin = await call('/api/admin/check-in', {
+    method: 'POST',
+    body: { ticketCode: day1Ticket.ticket_code }
+  });
+  assert.equal(day1Checkin.status, 200);
+  assert.match(day1Checkin.data.message, /Day 1 check-in successful/);
+
+  // Check-in Day 2 ticket today without sending activeDay: should be denied because it's for tomorrow
+  const day2Checkin = await call('/api/admin/check-in', {
+    method: 'POST',
+    body: { ticketCode: day2Ticket.ticket_code }
+  });
+  assert.equal(day2Checkin.status, 409);
+  assert.match(day2Checkin.data.error, /Day 2 Ticket! This ticket can only be used on Day 2/);
+  assert.equal(day2Checkin.data.dayEarly, true);
+});
+
 
 

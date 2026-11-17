@@ -698,28 +698,42 @@ async function handleCheckinRequest(req, res, next) {
       currentEventDay = Math.max(1, parseInt(req.body.activeDay, 10) || 1);
     } else {
       const todayLocal = getLocalDateString(now);
-      const issuedLocal = getLocalDateString(new Date(ticket.issued_at));
-      let day1Date = getEventDay1Date();
-      if (!day1Date) {
-        if (ticket.event_date) {
-          try {
-            const ed = new Date(ticket.event_date + 'T00:00:00');
-            const d1 = new Date(ed.getTime() - (passDay - 1) * 86400000);
-            day1Date = getLocalDateString(d1);
-          } catch {
-            day1Date = ticket.event_date;
-          }
-        } else {
-          day1Date = issuedLocal;
+      if (ticket.event_date && /^\d{4}-\d{2}-\d{2}$/.test(ticket.event_date)) {
+        if (todayLocal < ticket.event_date) {
+          return res.status(409).json({
+            error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`,
+            alreadyUsed: false,
+            day2Early: passDay === 2,
+            dayEarly: true,
+            passDay,
+            currentEventDay: 0,
+            maxDays,
+            ticket: serializeTicket(ticket)
+          });
         }
+        if (todayLocal > ticket.event_date) {
+          return res.status(409).json({
+            error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`,
+            alreadyUsed: (ticket.entry_count || 0) > 0,
+            dayExpired: true,
+            passDay,
+            currentEventDay: 999,
+            maxDays,
+            ticket: serializeTicket(ticket)
+          });
+        }
+        currentEventDay = passDay;
+      } else {
+        const issuedLocal = getLocalDateString(new Date(ticket.issued_at));
+        const customStart = getSetting('event_start_date');
+        const day1Date = (customStart && /^\d{4}-\d{2}-\d{2}$/.test(customStart)) ? customStart : issuedLocal;
+        try {
+          const d1 = new Date(day1Date + 'T00:00:00');
+          const dt = new Date(todayLocal + 'T00:00:00');
+          const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
+          currentEventDay = Math.max(1, diffDays + 1);
+        } catch {}
       }
-
-      try {
-        const d1 = new Date(day1Date + 'T00:00:00');
-        const dt = new Date(todayLocal + 'T00:00:00');
-        const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
-        currentEventDay = Math.max(1, diffDays + 1);
-      } catch {}
     }
 
     if (currentEventDay < passDay) {
