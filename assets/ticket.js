@@ -17,6 +17,17 @@ const code = extractTicketCode(params.get('code') || window.location.search.repl
 const state = document.getElementById('ticket-state');
 const container = document.getElementById('tickets-container');
 const actions = document.getElementById('ticket-actions');
+
+function escapeHtml(value = '') {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[char]);
+}
+
 function parseDateValue(val) {
   if (!val) return new Date();
   if (val instanceof Date) return Number.isNaN(val.getTime()) ? new Date() : val;
