@@ -20,6 +20,11 @@ var TARGET_SPREADSHEET_ID = "12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o";
 var VIEW_BASE_URL = "https://muhammadalisaim.github.io/caipsd-event-system/ticket.html";
 
 /**
+ * Master Security Password for Google Spreadsheet & Webhook API
+ */
+var SPREADSHEET_PASSWORD = "Event@2211";
+
+/**
  * OPTIONAL but recommended when you use the Node.js server:
  * put any long random text here AND the same text in .env as GOOGLE_WEBHOOK_SECRET.
  * Then only your server can send emails / read tickets through this script.
@@ -29,7 +34,7 @@ var WEBHOOK_SECRET = "";
 
 function isAuthorized(secret) {
   if (!WEBHOOK_SECRET) return true;
-  return String(secret || '') === WEBHOOK_SECRET;
+  return String(secret || '') === WEBHOOK_SECRET || String(secret || '') === SPREADSHEET_PASSWORD;
 }
 
 function escapeHtml(value) {
@@ -674,13 +679,99 @@ function respondJson(data) {
  * Wahan se 1-click se sheet ko align aur auto-format kar sakte hain.
  */
 function onOpen() {
+  try {
+    if (typeof SpreadsheetApp === 'undefined' || !SpreadsheetApp.getUi) return;
+    var ui = SpreadsheetApp.getUi();
+    ui.createMenu('⚡ CAIPSD Event')
+      .addItem('🔓 Unlock Sheet (Password)', 'unlockSheetWithPassword')
+      .addItem('🔒 Lock Sheet (Require Password)', 'lockSheet')
+      .addSeparator()
+      .addItem('✨ Align & Auto-Format Sheet', 'formatAndAlignSheet')
+      .addItem('🧹 Clean Duplicate Rows', 'cleanDuplicateRows')
+      .addItem('🧹 Remove Blank Columns (C & D)', 'formatAndAlignSheet')
+      .addItem('🏷️ Restore All Headers (Email & Phone)', 'formatWithAllColumns')
+      .addToUi();
+  } catch (e) {}
+}
+
+/**
+ * Unlock Sheet: Prompts user for password 'Event@2211'.
+ * If correct, reveals the CAIPSD_Tickets sheet and hides the locked splash sheet.
+ */
+function unlockSheetWithPassword() {
   var ui = SpreadsheetApp.getUi();
-  ui.createMenu('⚡ CAIPSD Event')
-    .addItem('✨ Align & Auto-Format Sheet', 'formatAndAlignSheet')
-    .addItem('🧹 Clean Duplicate Rows', 'cleanDuplicateRows')
-    .addItem('🧹 Remove Blank Columns (C & D)', 'formatAndAlignSheet')
-    .addItem('🏷️ Restore All Headers (Email & Phone)', 'formatWithAllColumns')
-    .addToUi();
+  var response = ui.prompt(
+    '🔒 CAIPSD Security Check',
+    'Please enter the spreadsheet password to view participant data:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+
+  var entered = String(response.getResponseText() || '').trim();
+  if (entered !== SPREADSHEET_PASSWORD) {
+    ui.alert('❌ Access Denied', 'Incorrect password! The sheet remains locked.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var ss = getSpreadsheet();
+  var ticketsSheet = ss.getSheetByName("CAIPSD_Tickets") || ss.getSheetByName("Tickets");
+  if (ticketsSheet) {
+    ticketsSheet.showSheet();
+    ss.setActiveSheet(ticketsSheet);
+  }
+
+  var lockSheet = ss.getSheetByName("🔒_LOCKED");
+  if (lockSheet && ss.getSheets().length > 1) {
+    lockSheet.hideSheet();
+  }
+
+  ui.alert('✓ Access Granted', 'Spreadsheet unlocked successfully! You can now view and edit participant tickets.', ui.ButtonSet.OK);
+}
+
+/**
+ * Lock Sheet: Hides the CAIPSD_Tickets data sheet and displays the locked splash screen.
+ */
+function lockSheet() {
+  var ss = getSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var lockSheet = ss.getSheetByName("🔒_LOCKED");
+  if (!lockSheet) {
+    lockSheet = ss.insertSheet("🔒_LOCKED", 0);
+    lockSheet.setTabColor("#dc2626");
+    lockSheet.getRange("A1").setValue("🔒 CAIPSD EVENT MANAGEMENT — PROTECTED SPREADSHEET");
+    lockSheet.getRange("A3").setValue("This Google Sheet is password protected.");
+    lockSheet.getRange("A4").setValue("To view or edit participant data, click:");
+    lockSheet.getRange("A5").setValue("👉 Menu: '⚡ CAIPSD Event' > '🔓 Unlock Sheet (Password)'");
+    lockSheet.getRange("A7").setValue("Authorized Password Required: Event@2211");
+
+    lockSheet.getRange("A1:G1").merge()
+      .setBackground("#0d1930")
+      .setFontColor("#ffffff")
+      .setFontSize(14)
+      .setFontWeight("bold")
+      .setHorizontalAlignment("center");
+
+    lockSheet.getRange("A3:A7")
+      .setFontSize(12)
+      .setFontFamily("Arial");
+    lockSheet.getRange("A5").setFontWeight("bold").setFontColor("#b45309");
+
+    lockSheet.setColumnWidth(1, 480);
+  }
+
+  lockSheet.showSheet();
+  ss.setActiveSheet(lockSheet);
+
+  var ticketsSheet = ss.getSheetByName("CAIPSD_Tickets") || ss.getSheetByName("Tickets");
+  if (ticketsSheet && ss.getSheets().length > 1) {
+    ticketsSheet.hideSheet();
+  }
+
+  ui.alert('🔒 Sheet Locked', 'Participant data has been hidden. Anyone opening this sheet must use the menu to unlock it with password Event@2211.', ui.ButtonSet.OK);
 }
 
 /**

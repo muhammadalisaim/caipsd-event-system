@@ -38,6 +38,7 @@ const isStaticHost = Boolean(
 );
 
 const GOOGLE_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzodcplXRQvdPQlWLPeQbGOZdomvehyFGo4wG5K_9ugWSGuFKN-sRy6hfA6cq5AV-ds2Q/exec';
+const GOOGLE_WEBHOOK_SECRET = 'Event@2211';
 
 // The Apps Script text lives in google-apps-script.js (one copy, served next to this site).
 async function loadAppsScriptCode() {
@@ -295,6 +296,7 @@ function pushTicketToSheet(ticketOrTickets, type = 'appendTicket') {
   const payload = {
     action: type === 'append' ? 'appendTicket' : (type === 'update' ? 'updateTicket' : type),
     sheetName: 'CAIPSD_Tickets',
+    secret: GOOGLE_WEBHOOK_SECRET,
     fullName: group.baseName,
     ticketCode: fullCodeStr || rawFirst.ticket_code,
     singleCode: rawFirst.ticket_code,
@@ -326,6 +328,7 @@ async function syncAllTicketsToSheet(tickets) {
   const payload = {
     action: 'syncAll',
     sheetName: 'CAIPSD_Tickets',
+    secret: GOOGLE_WEBHOOK_SECRET,
     headers: ['Ticket ID', 'Full Name', 'Issued At', 'Valid Until', 'Status', 'Entries', 'First Entry', 'Last Entry'],
     rows: rows
   };
@@ -363,7 +366,7 @@ async function pushTicketEmailToSheet(ticket) {
   const fullName = String(ticket.full_name || ticket.fullName || 'Participant').trim();
 
   // Try GET request first - standard browser cross-origin friendly, no CORS preflight or POST redirect rewrite issues
-  const getUrl = `${url}?action=sendTicketEmail&to=${encodeURIComponent(recipient)}&ticketCode=${encodeURIComponent(ticketCode)}&fullName=${encodeURIComponent(fullName)}&_t=${Date.now()}`;
+  const getUrl = `${url}?action=sendTicketEmail&secret=${encodeURIComponent(GOOGLE_WEBHOOK_SECRET)}&to=${encodeURIComponent(recipient)}&ticketCode=${encodeURIComponent(ticketCode)}&fullName=${encodeURIComponent(fullName)}&_t=${Date.now()}`;
 
   let result = null;
   let fetchError = null;
@@ -390,6 +393,7 @@ async function pushTicketEmailToSheet(ticket) {
   const payload = {
     action: 'sendTicketEmail',
     sheetName: 'CAIPSD_Tickets',
+    secret: GOOGLE_WEBHOOK_SECRET,
     to: recipient,
     ticketCode: ticketCode,
     fullName: fullName,
@@ -441,7 +445,7 @@ async function pushTestEmailToSheet(to) {
   const url = getGoogleWebAppUrl();
   if (!url) return;
   const recipient = String(to || '').trim().toLowerCase();
-  const getUrl = `${url}?action=sendTestEmail&to=${encodeURIComponent(recipient)}&_t=${Date.now()}`;
+  const getUrl = `${url}?action=sendTestEmail&secret=${encodeURIComponent(GOOGLE_WEBHOOK_SECRET)}&to=${encodeURIComponent(recipient)}&_t=${Date.now()}`;
   let result = null;
   let fetchError = null;
 
@@ -465,6 +469,7 @@ async function pushTestEmailToSheet(to) {
 
   const payload = {
     action: 'sendTestEmail',
+    secret: GOOGLE_WEBHOOK_SECRET,
     to: recipient
   };
 
@@ -1143,7 +1148,7 @@ async function handleStaticApi(url, options = {}) {
           fetch(GOOGLE_WEB_APP_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'cancel', ticket_code: t.ticket_code }),
+            body: JSON.stringify({ action: 'cancel', secret: GOOGLE_WEBHOOK_SECRET, ticket_code: t.ticket_code }),
             mode: 'no-cors'
           }).catch(() => {});
         } catch {}
@@ -1164,7 +1169,7 @@ async function handleStaticApi(url, options = {}) {
         fetch(GOOGLE_WEB_APP_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'cancel', ticket_code: t.ticket_code }),
+          body: JSON.stringify({ action: 'cancel', secret: GOOGLE_WEBHOOK_SECRET, ticket_code: t.ticket_code }),
           mode: 'no-cors'
         }).catch(() => {});
       } catch {}
