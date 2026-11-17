@@ -10,6 +10,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/ticket.css" />
+  <script>
+    window.escapeHtml = function(value) {
+      return String(value ?? '').replace(/[&<>"']/g, function(char) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char];
+      });
+    };
+  </script>
 </head>
 <body>
   <header class="ticket-header"><a class="brand" href="/admin.html"><img src="/assets/caipsd-logo.png" alt="CAIPSD" class="ticket-header-logo" /></a></header>
@@ -20,6 +27,6 @@
     <div id="ticket-actions" class="ticket-actions" hidden><button class="button button-dark" id="print-ticket">Print / Save as PDF <span>↗</span></button><button class="button button-ghost" id="copy-link" type="button">Copy ticket link</button><div class="copy-note" id="copy-note" role="status"></div></div>
     <div class="ticket-help">Need help with your ticket? Please contact the CAIPSD event organisers.</div>
   </main>
-  <script src="/assets/ticket.js" defer></script>
+  <script src="/assets/ticket.js?v=1.2.2" defer></script>
 </body>
 </html>

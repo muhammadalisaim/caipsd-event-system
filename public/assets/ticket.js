@@ -27,6 +27,7 @@ function escapeHtml(value = '') {
     "'": '&#39;'
   })[char]);
 }
+window.escapeHtml = escapeHtml;
 
 function parseDateValue(val) {
   if (!val) return new Date();
