@@ -643,6 +643,57 @@ app.post('/api/admin/tickets/email-all', requireAdmin, mailActionLimiter, async 
   } catch (error) { next(error); }
 });
 
+app.delete('/api/admin/tickets', requireAdmin, async (req, res, next) => {
+  try {
+    if (req.body && req.body.all === true) {
+      const allTickets = db.prepare('SELECT id, ticket_code FROM tickets').all();
+      for (const t of allTickets) {
+        if (t.ticket_code) recordTicketCancelled(t.ticket_code);
+      }
+      db.prepare('DELETE FROM tickets').run();
+      syncAllTickets([]).catch((err) => console.error('Sheet syncAll error:', err.message));
+      return res.json({ message: `All ${allTickets.length} ticket(s) deleted successfully.`, count: allTickets.length });
+    }
+
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+    const codes = Array.isArray(req.body?.codes) ? req.body.codes.map((c) => String(c).trim().toUpperCase()).filter(Boolean) : [];
+
+    if (!ids.length && !codes.length) {
+      return res.status(400).json({ error: 'Please specify ticket IDs or codes to delete, or set all: true.' });
+    }
+
+    const conditions = [];
+    const params = [];
+    if (ids.length) {
+      conditions.push(`id IN (${ids.map(() => '?').join(',')})`);
+      params.push(...ids);
+    }
+    if (codes.length) {
+      conditions.push(`ticket_code IN (${codes.map(() => '?').join(',')})`);
+      params.push(...codes);
+    }
+
+    const toDelete = db.prepare(`SELECT id, ticket_code FROM tickets WHERE ${conditions.join(' OR ')}`).all(...params);
+    const allCodesToCancel = new Set([...toDelete.map((t) => t.ticket_code).filter(Boolean), ...codes]);
+
+    for (const c of allCodesToCancel) {
+      recordTicketCancelled(c);
+      sheetsCancelTicket(c).catch((err) => console.error('Sheet cancel error:', err.message));
+    }
+
+    let deletedCount = 0;
+    if (toDelete.length) {
+      const delIds = toDelete.map((t) => t.id);
+      const delRes = db.prepare(`DELETE FROM tickets WHERE id IN (${delIds.map(() => '?').join(',')})`).run(...delIds);
+      deletedCount = delRes.changes;
+    }
+
+    res.json({ message: `${deletedCount || allCodesToCancel.size} ticket(s) cancelled successfully.`, count: deletedCount || allCodesToCancel.size });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid ticket.' });

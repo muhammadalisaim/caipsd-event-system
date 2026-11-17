@@ -398,6 +398,7 @@
               <button class="admin-button admin-button-secondary" id="export-csv">↓ Export CSV</button>
               <button class="admin-button admin-button-secondary" id="btn-bulk-tickets">＋ Bulk Issue</button>
               <button class="admin-button admin-button-primary" data-action="new-ticket">＋ Issue Ticket</button>
+              <button class="admin-button admin-button-danger-outline" id="btn-delete-all-tickets" title="Permanently delete all tickets">🗑 Delete All</button>
             </div>
           </div>
           <section class="panel full-panel">
@@ -409,6 +410,11 @@
                 <option value="checked_in">Entered</option>
                 <option value="expired">Expired</option>
               </select>
+              <div id="batch-actions-bar" class="batch-actions-bar" style="display:none;">
+                <span id="batch-selected-count" class="batch-selected-count">0 selected</span>
+                <button type="button" id="btn-delete-selected" class="admin-button admin-button-danger-outline" style="height:36px;padding:0 12px;font-size:13px;">🗑 Delete Selected</button>
+                <button type="button" id="btn-clear-selection" class="admin-button admin-button-light" style="height:36px;padding:0 12px;font-size:13px;">Clear</button>
+              </div>
             </div>
             <div id="tickets-table" class="table-wrap"><div class="table-loading">Loading tickets…</div></div>
             <div class="table-footnote">Showing up to 500 most recent tickets.</div>

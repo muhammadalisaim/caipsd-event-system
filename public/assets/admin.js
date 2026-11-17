@@ -1122,6 +1122,37 @@ async function handleStaticApi(url, options = {}) {
     };
   }
 
+  if (url === '/api/admin/tickets' && method === 'DELETE') {
+    let list = getLocalTickets();
+    if (body.all === true) {
+      const count = list.length;
+      saveLocalTickets([]);
+      try {
+        syncAllTicketsToSheet([]).catch(() => {});
+      } catch {}
+      return { message: `All ${count} ticket(s) deleted.`, count };
+    }
+    const ids = Array.isArray(body.ids) ? body.ids.map(Number) : [];
+    const codes = Array.isArray(body.codes) ? body.codes.map((c) => String(c).toUpperCase()) : [];
+    const toDelete = list.filter((x) => ids.includes(x.id) || (x.ticket_code && codes.includes(x.ticket_code.toUpperCase())));
+    list = list.filter((x) => !ids.includes(x.id) && !(x.ticket_code && codes.includes(x.ticket_code.toUpperCase())));
+    saveLocalTickets(list);
+    for (const t of toDelete) {
+      if (t.ticket_code) {
+        try {
+          fetch(GOOGLE_WEB_APP_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'cancel', ticket_code: t.ticket_code }),
+            mode: 'no-cors'
+          }).catch(() => {});
+        } catch {}
+      }
+    }
+    syncAllTicketsToSheet(list).catch(() => {});
+    return { message: `${toDelete.length} ticket(s) cancelled.`, count: toDelete.length };
+  }
+
   if (url.startsWith('/api/admin/tickets/') && method === 'DELETE') {
     const id = parseInt(url.split('/')[4], 10);
     let list = getLocalTickets();
@@ -1551,7 +1582,7 @@ function ticketsTable(rows, withActions, groupStorage = null) {
     groupStorage.length = 0;
     groupStorage.push(...groups);
   }
-  const head = `<tr><th>PARTICIPANT</th><th>PHONE / INFO</th><th>TICKET ID</th><th>WORKSHOP DATE / VALIDITY</th><th>ATTENDANCE</th>${withActions ? '<th>ACTION</th>' : ''}</tr>`;
+  const head = `<tr>${withActions ? '<th class="checkbox-col"><input type="checkbox" id="select-all-tickets" title="Select All" aria-label="Select all" /></th>' : ''}<th>PARTICIPANT</th><th>PHONE / INFO</th><th>TICKET ID</th><th>WORKSHOP DATE / VALIDITY</th><th>ATTENDANCE</th>${withActions ? '<th>ACTION</th>' : ''}</tr>`;
   const body = groups.map((g, idx) => {
     let codeHtml;
     if (g.tickets.length > 1) {
@@ -1569,13 +1600,125 @@ function ticketsTable(rows, withActions, groupStorage = null) {
       ? `<strong>${escapeHtml(formatEventDateShort(eventDateStr, g.tickets.length))}</strong><small style="display:block;color:var(--text-muted, #777);font-size:11px;">Expires: ${escapeHtml(dateTimeLabel(g.validUntil))}</small>`
       : `<span>${escapeHtml(dateTimeLabel(g.validUntil))}</span>`;
     const actionsHtml = withActions ? `<td><div class="row-actions"><a class="status-action open-ticket-page" href="ticket.html?code=${encodeURIComponent(firstCode)}&_t=${Date.now()}" target="_blank" rel="noopener">View / Print</a><button type="button" class="status-action danger cancel-group" data-index="${idx}" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
-    return `<tr class="participant-row" data-index="${idx}" data-key="${escapeHtml(g.key)}" style="cursor:pointer;" title="Click to view passes"><td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${dateCellHtml}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
+    const checkboxHtml = withActions ? `<td class="checkbox-col" onclick="event.stopPropagation()"><input type="checkbox" class="ticket-row-check" data-index="${idx}" aria-label="Select participant" /></td>` : '';
+    return `<tr class="participant-row" data-index="${idx}" data-key="${escapeHtml(g.key)}" style="cursor:pointer;" title="Click to view passes">${checkboxHtml}<td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${dateCellHtml}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
   }).join('');
   return `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
 function bindTicketsTableEvents(container, groups) {
   if (!container || !groups) return;
+
+  const selectAll = container.querySelector('#select-all-tickets');
+  const batchBar = $('#batch-actions-bar');
+  const batchCount = $('#batch-selected-count');
+  const btnDeleteSelected = $('#btn-delete-selected');
+  const btnClearSelection = $('#btn-clear-selection');
+
+  const selectedIndices = new Set();
+
+  function updateBatchBar() {
+    if (!batchBar || !batchCount) return;
+    const count = selectedIndices.size;
+    if (count > 0) {
+      let ticketsCount = 0;
+      selectedIndices.forEach((i) => {
+        if (groups[i] && groups[i].tickets) {
+          ticketsCount += groups[i].tickets.length;
+        }
+      });
+      batchCount.textContent = `${count} participant${count === 1 ? '' : 's'} (${ticketsCount} pass${ticketsCount === 1 ? '' : 'es'}) selected`;
+      batchBar.style.display = 'flex';
+    } else {
+      batchBar.style.display = 'none';
+    }
+    if (selectAll) {
+      selectAll.checked = groups.length > 0 && selectedIndices.size === groups.length;
+      selectAll.indeterminate = selectedIndices.size > 0 && selectedIndices.size < groups.length;
+    }
+  }
+
+  updateBatchBar();
+
+  if (selectAll) {
+    selectAll.addEventListener('change', () => {
+      const checked = selectAll.checked;
+      container.querySelectorAll('.ticket-row-check').forEach((cb) => {
+        cb.checked = checked;
+        const idx = Number(cb.dataset.index);
+        if (checked) {
+          selectedIndices.add(idx);
+        } else {
+          selectedIndices.delete(idx);
+        }
+      });
+      updateBatchBar();
+    });
+  }
+
+  container.querySelectorAll('.ticket-row-check').forEach((cb) => {
+    cb.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const idx = Number(cb.dataset.index);
+      if (cb.checked) {
+        selectedIndices.add(idx);
+      } else {
+        selectedIndices.delete(idx);
+      }
+      updateBatchBar();
+    });
+    cb.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+  });
+
+  if (btnClearSelection) {
+    btnClearSelection.onclick = () => {
+      selectedIndices.clear();
+      container.querySelectorAll('.ticket-row-check').forEach((cb) => {
+        cb.checked = false;
+      });
+      updateBatchBar();
+    };
+  }
+
+  if (btnDeleteSelected) {
+    btnDeleteSelected.onclick = async () => {
+      if (selectedIndices.size === 0) return;
+      const count = selectedIndices.size;
+      const ticketIds = [];
+      const ticketCodes = [];
+      selectedIndices.forEach((i) => {
+        const g = groups[i];
+        if (g && g.tickets) {
+          g.tickets.forEach((t) => {
+            if (t.id) ticketIds.push(t.id);
+            if (t.ticket_code) ticketCodes.push(t.ticket_code);
+          });
+        }
+      });
+
+      const confirmed = confirm(`Are you sure you want to delete ${count} selected participant(s) (${ticketIds.length} tickets)?\n\nTheir QR codes will immediately stop working.`);
+      if (!confirmed) return;
+
+      btnDeleteSelected.disabled = true;
+      try {
+        const res = await api('/api/admin/tickets', {
+          method: 'DELETE',
+          body: JSON.stringify({ ids: ticketIds, codes: ticketCodes })
+        });
+        toast(res.message || `Deleted ${count} participant(s).`);
+        selectedIndices.clear();
+        await loadTickets();
+        refreshStats();
+      } catch (error) {
+        toast(error.message, 'error');
+      } finally {
+        btnDeleteSelected.disabled = false;
+      }
+    };
+  }
+
   container.querySelectorAll('.open-ticket-page').forEach((link) => {
     link.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1584,7 +1727,7 @@ function bindTicketsTableEvents(container, groups) {
 
   container.querySelectorAll('.participant-row').forEach((row) => {
     row.addEventListener('click', (e) => {
-      if (e.target.closest('button, a')) return;
+      if (e.target.closest('button, a, input[type="checkbox"], .checkbox-col')) return;
       const idx = Number(row.dataset.index);
       const group = groups[idx] || (currentGroupedMap ? currentGroupedMap.get(row.dataset.key) : null);
       if (group && group.tickets && group.tickets[0]) {
@@ -1603,9 +1746,12 @@ function bindTicketsTableEvents(container, groups) {
       if (!confirm(`Cancel ${count} ticket${count === 1 ? '' : 's'} for ${group.baseName}? QR code${count === 1 ? '' : 's'} will stop working.`)) return;
       button.disabled = true;
       try {
-        for (const t of group.tickets) {
-          await api(`/api/admin/tickets/${t.id}`, { method: 'DELETE' });
-        }
+        const ids = group.tickets.map(t => t.id).filter(Boolean);
+        const codes = group.tickets.map(t => t.ticket_code).filter(Boolean);
+        await api('/api/admin/tickets', {
+          method: 'DELETE',
+          body: JSON.stringify({ ids, codes })
+        });
         toast(`Tickets cancelled for ${group.baseName}.`);
         await loadTickets();
         refreshStats();
@@ -1665,6 +1811,36 @@ async function exportCsv() {
 }
 $('#export-csv').addEventListener('click', exportCsv);
 $('#quick-export').addEventListener('click', exportCsv);
+
+$('#btn-delete-all-tickets')?.addEventListener('click', async () => {
+  const currentGroups = currentTicketsGroups || [];
+  const totalParticipants = currentGroups.length;
+  const totalTickets = currentGroups.reduce((acc, g) => acc + (g.tickets ? g.tickets.length : 0), 0);
+  if (totalParticipants === 0) {
+    toast('No tickets to delete.', 'info');
+    return;
+  }
+  const confirmed = confirm(`⚠️ Are you sure you want to delete ALL tickets?\n\nThis will permanently delete all ${totalTickets} ticket(s) for ${totalParticipants} participant(s). All QR codes will stop working immediately.\n\nThis action CANNOT be undone!`);
+  if (!confirmed) return;
+  const confirmedAgain = confirm('Please confirm once more: Do you really want to delete ALL tickets?');
+  if (!confirmedAgain) return;
+
+  const btn = $('#btn-delete-all-tickets');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api('/api/admin/tickets', {
+      method: 'DELETE',
+      body: JSON.stringify({ all: true })
+    });
+    toast(res.message || 'All tickets deleted successfully.');
+    await loadTickets();
+    refreshStats();
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
 
 /* ---- Issue ticket modal ---- */
 const ticketModal = $('#ticket-modal');

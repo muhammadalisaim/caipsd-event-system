@@ -9,7 +9,7 @@ process.env.TICKET_VALID_DAYS = '2';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { app } = require('../server');
-const { db } = require('../db');
+const { db, isTicketCancelled } = require('../db');
 const { buildMessage } = require('../mailer');
 
 let server; let base; let cookie = '';
@@ -454,6 +454,56 @@ test('automatic day detection permits Day 1 today and denies Day 2 pass without 
   assert.equal(day2Checkin.status, 409);
   assert.match(day2Checkin.data.error, /Day 2 Ticket! This ticket can only be used on Day 2/);
   assert.equal(day2Checkin.data.dayEarly, true);
+});
+
+test('bulk delete tickets by ids and delete all tickets', async () => {
+  // Issue multiple participants
+  const res1 = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Batch User One', days: 1 }
+  });
+  const res2 = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Batch User Two', days: 1 }
+  });
+  const res3 = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Batch User Three', days: 1 }
+  });
+
+  const id1 = res1.data.ticket.id;
+  const id2 = res2.data.ticket.id;
+  const id3 = res3.data.ticket.id;
+  const code1 = res1.data.ticket.ticket_code;
+
+  // Batch delete user 1 and user 2
+  const delBatch = await call('/api/admin/tickets', {
+    method: 'DELETE',
+    body: { ids: [id1, id2] }
+  });
+  assert.equal(delBatch.status, 200);
+  assert.equal(delBatch.data.count, 2);
+  assert.equal(isTicketCancelled(code1), true);
+
+  // Check remaining tickets
+  const listAfterBatch = await call('/api/admin/tickets');
+  assert.equal(listAfterBatch.status, 200);
+  const remainingIds = listAfterBatch.data.tickets.map((t) => t.id);
+  assert.ok(!remainingIds.includes(id1));
+  assert.ok(!remainingIds.includes(id2));
+  assert.ok(remainingIds.includes(id3));
+
+  // Delete all tickets
+  const delAll = await call('/api/admin/tickets', {
+    method: 'DELETE',
+    body: { all: true }
+  });
+  assert.equal(delAll.status, 200);
+
+  // List should now be completely empty
+  const listAfterAll = await call('/api/admin/tickets');
+  assert.equal(listAfterAll.status, 200);
+  assert.equal(listAfterAll.data.tickets.length, 0);
 });
 
 
