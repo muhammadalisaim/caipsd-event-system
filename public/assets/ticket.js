@@ -17,11 +17,28 @@ const code = extractTicketCode(params.get('code') || window.location.search.repl
 const state = document.getElementById('ticket-state');
 const container = document.getElementById('tickets-container');
 const actions = document.getElementById('ticket-actions');
-function escapeHtml(value = '') { return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]); }
+function parseDateValue(val) {
+  if (!val) return new Date();
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? new Date() : val;
+  const str = String(val).trim();
+  const gvizMatch = str.match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/i);
+  if (gvizMatch) {
+    const y = parseInt(gvizMatch[1], 10);
+    const m = parseInt(gvizMatch[2], 10);
+    const d = parseInt(gvizMatch[3], 10);
+    const h = parseInt(gvizMatch[4] || '0', 10);
+    const min = parseInt(gvizMatch[5] || '0', 10);
+    const s = parseInt(gvizMatch[6] || '0', 10);
+    return new Date(y, m, d, h, min, s);
+  }
+  const parsed = new Date(str);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return new Date();
+}
 
 function renderTicketCard(t, markSrc) {
   const eventDateObj = t.event_date ? new Date(t.event_date + 'T00:00:00') : null;
-  const until = new Date(t.valid_until);
+  const until = parseDateValue(t.valid_until);
 
   let formattedDate;
   let dateFieldLabel = 'VALID UNTIL';
@@ -156,9 +173,13 @@ async function loadTicket() {
                 const basePerson = rawPerson.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
 
                 const val2 = getV(c[2]);
-                const is11 = val2.includes('@') || (c.length > 9 && !val2.includes('-') && !val2.includes('T'));
-                const issued = is11 ? getV(c[4]) : val2;
-                const valid = is11 ? getV(c[5]) : getV(c[3]);
+                const is11 = val2.includes('@') || (c.length > 9 && !val2.includes('-') && !val2.includes('T') && !val2.includes(':'));
+                const rawIssued = is11 ? getV(c[4]) : val2;
+                const rawValid = is11 ? getV(c[5]) : getV(c[3]);
+                const issuedDate = parseDateValue(rawIssued);
+                const validDate = parseDateValue(rawValid);
+                const issued = issuedDate.toISOString();
+                const valid = validDate.toISOString();
                 const status = (is11 ? getV(c[6]) : getV(c[4])) || 'valid';
                 const rawEntriesStr = String((is11 ? getV(c[7]) : getV(c[5])) || '').trim();
 
@@ -182,22 +203,27 @@ async function loadTicket() {
                         dayEntries = 1;
                       }
                     }
+                    const passDate = new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
+                    const eventDateStr = `${passDate.getFullYear()}-${String(passDate.getMonth() + 1).padStart(2, '0')}-${String(passDate.getDate()).padStart(2, '0')}`;
                     return {
                       full_name: `${basePerson} (Day ${dayNum})`,
                       ticket_code: passCode,
                       issued_at: issued,
                       valid_until: valid,
+                      event_date: eventDateStr,
                       status: status === 'cancelled' ? 'cancelled' : (dayEntries >= 1 ? 'checked_in' : 'valid'),
                       entry_count: dayEntries
                     };
                   });
                 } else {
                   const singleEntryCount = parseInt(rawEntriesStr.replace(/^[^\d]*/, ''), 10) || (String(status).toLowerCase().includes('entered') ? 1 : 0);
+                  const eventDateStr = `${issuedDate.getFullYear()}-${String(issuedDate.getMonth() + 1).padStart(2, '0')}-${String(issuedDate.getDate()).padStart(2, '0')}`;
                   ticketsList = [{
                     full_name: rawPerson,
                     ticket_code: rawCodeStr.toUpperCase(),
                     issued_at: issued,
                     valid_until: valid,
+                    event_date: eventDateStr,
                     status: status === 'cancelled' ? 'cancelled' : (singleEntryCount >= 1 ? 'checked_in' : status),
                     entry_count: singleEntryCount
                   }];

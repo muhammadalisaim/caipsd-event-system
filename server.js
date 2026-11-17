@@ -189,11 +189,31 @@ function normalizeEmail(value) { return cleanText(value, 180).toLowerCase(); }
 function validPhone(value) { return /^\+?[0-9][0-9\s\-()]{6,28}$/.test(value); }
 function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }
 function escapeLike(value) { return value.replace(/[\\%_]/g, (c) => `\\${c}`); }
+function parseDateValue(val) {
+  if (!val) return new Date();
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? new Date() : val;
+  const str = String(val).trim();
+  const gvizMatch = str.match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/i);
+  if (gvizMatch) {
+    const y = parseInt(gvizMatch[1], 10);
+    const m = parseInt(gvizMatch[2], 10);
+    const d = parseInt(gvizMatch[3], 10);
+    const h = parseInt(gvizMatch[4] || '0', 10);
+    const min = parseInt(gvizMatch[5] || '0', 10);
+    const s = parseInt(gvizMatch[6] || '0', 10);
+    return new Date(y, m, d, h, min, s);
+  }
+  const parsed = new Date(str);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return new Date();
+}
 function getLocalDateString(date = new Date(), timeZone = process.env.EVENT_TIMEZONE || 'Asia/Karachi') {
   try {
-    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+    const d = parseDateValue(date);
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
   } catch {
-    return date.toISOString().slice(0, 10);
+    const d = parseDateValue(date);
+    return d.toISOString().slice(0, 10);
   }
 }
 function getEventDay1Date() {
@@ -647,14 +667,21 @@ async function handleCheckinRequest(req, res, next) {
     if (!ticket) {
       try {
         const sheetTickets = await getSheetTicketsCached();
-        const found = sheetTickets.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === match[0]);
+        const found = sheetTickets.find((x) => {
+          if (!x.ticket_code) return false;
+          const c = x.ticket_code.toUpperCase();
+          return c === match[0] || c.includes(match[0]);
+        });
         if (found && (sheetTicketCancelled(found) || isTicketCancelled(match[0]))) {
           return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
         }
         if (found) {
           const issued = isoOr(found.issued_at, new Date().toISOString());
           const validUntil = isoOr(found.valid_until, new Date(Date.now() + getDefaultValidDays() * 86400000).toISOString());
-          db.prepare(`INSERT OR IGNORE INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status, max_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          const m = (found.full_name || '').match(/\(Day\s*(\d+)\)/i);
+          const dayNum = m ? parseInt(m[1], 10) : 1;
+          const eventDateStr = found.event_date || getLocalDateString(new Date(parseDateValue(issued).getTime() + (dayNum - 1) * 86400000));
+          db.prepare(`INSERT OR IGNORE INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status, max_days, event_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
             found.full_name || 'Participant',
             found.email || '',
             found.phone || '',
@@ -665,7 +692,8 @@ async function handleCheckinRequest(req, res, next) {
             found.first_entry_at || null,
             found.last_entry_at || null,
             found.email_status || 'not_sent',
-            getDefaultValidDays()
+            1,
+            eventDateStr
           );
           ticket = getTicketByCode(match[0]);
         }
@@ -696,69 +724,67 @@ async function handleCheckinRequest(req, res, next) {
     let currentEventDay = 1;
     if (req.body.activeDay && req.body.activeDay !== 'auto') {
       currentEventDay = Math.max(1, parseInt(req.body.activeDay, 10) || 1);
+      if (currentEventDay < passDay) {
+        return res.status(409).json({
+          error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`,
+          alreadyUsed: false,
+          day2Early: passDay === 2,
+          dayEarly: true,
+          passDay,
+          currentEventDay,
+          maxDays,
+          ticket: serializeTicket(ticket)
+        });
+      }
+      if (dayMatch && passDay < currentEventDay) {
+        return res.status(409).json({
+          error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`,
+          alreadyUsed: (ticket.entry_count || 0) > 0,
+          dayExpired: true,
+          passDay,
+          currentEventDay,
+          maxDays,
+          ticket: serializeTicket(ticket)
+        });
+      }
     } else {
       const todayLocal = getLocalDateString(now);
-      if (ticket.event_date && /^\d{4}-\d{2}-\d{2}$/.test(ticket.event_date)) {
-        if (todayLocal < ticket.event_date) {
-          return res.status(409).json({
-            error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`,
-            alreadyUsed: false,
-            day2Early: passDay === 2,
-            dayEarly: true,
-            passDay,
-            currentEventDay: 0,
-            maxDays,
-            ticket: serializeTicket(ticket)
-          });
-        }
-        if (todayLocal > ticket.event_date) {
-          return res.status(409).json({
-            error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`,
-            alreadyUsed: (ticket.entry_count || 0) > 0,
-            dayExpired: true,
-            passDay,
-            currentEventDay: 999,
-            maxDays,
-            ticket: serializeTicket(ticket)
-          });
-        }
-        currentEventDay = passDay;
-      } else {
-        const issuedLocal = getLocalDateString(new Date(ticket.issued_at));
+      let ticketEventDate = ticket.event_date;
+      if (!ticketEventDate || !/^\d{4}-\d{2}-\d{2}$/.test(ticketEventDate)) {
         const customStart = getSetting('event_start_date');
-        const day1Date = (customStart && /^\d{4}-\d{2}-\d{2}$/.test(customStart)) ? customStart : issuedLocal;
-        try {
-          const d1 = new Date(day1Date + 'T00:00:00');
-          const dt = new Date(todayLocal + 'T00:00:00');
-          const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
-          currentEventDay = Math.max(1, diffDays + 1);
-        } catch {}
+        if (customStart && /^\d{4}-\d{2}-\d{2}$/.test(customStart)) {
+          const s = new Date(customStart + 'T00:00:00');
+          ticketEventDate = getLocalDateString(new Date(s.getTime() + (passDay - 1) * 86400000));
+        } else {
+          const issuedDate = parseDateValue(ticket.issued_at);
+          ticketEventDate = getLocalDateString(new Date(issuedDate.getTime() + (passDay - 1) * 86400000));
+        }
       }
-    }
 
-    if (currentEventDay < passDay) {
-      return res.status(409).json({
-        error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`,
-        alreadyUsed: false,
-        day2Early: passDay === 2,
-        dayEarly: true,
-        passDay,
-        currentEventDay,
-        maxDays,
-        ticket: serializeTicket(ticket)
-      });
-    }
-
-    if (dayMatch && passDay < currentEventDay) {
-      return res.status(409).json({
-        error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`,
-        alreadyUsed: (ticket.entry_count || 0) > 0,
-        dayExpired: true,
-        passDay,
-        currentEventDay,
-        maxDays,
-        ticket: serializeTicket(ticket)
-      });
+      if (todayLocal < ticketEventDate) {
+        return res.status(409).json({
+          error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`,
+          alreadyUsed: false,
+          day2Early: passDay === 2,
+          dayEarly: true,
+          passDay,
+          currentEventDay: 0,
+          maxDays,
+          ticket: serializeTicket(ticket)
+        });
+      }
+      if (todayLocal > ticketEventDate) {
+        return res.status(409).json({
+          error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`,
+          alreadyUsed: (ticket.entry_count || 0) > 0,
+          dayExpired: true,
+          passDay,
+          currentEventDay: 999,
+          maxDays,
+          ticket: serializeTicket(ticket)
+        });
+      }
+      currentEventDay = passDay;
     }
 
     // 3. 1 scan per calendar day

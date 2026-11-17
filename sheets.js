@@ -68,9 +68,36 @@ function saveSheetsConfig(data) {
   return getSheetsConfig();
 }
 
+function parseDateValue(val) {
+  if (!val) return new Date();
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? new Date() : val;
+  const str = String(val).trim();
+  const gvizMatch = str.match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/i);
+  if (gvizMatch) {
+    const y = parseInt(gvizMatch[1], 10);
+    const m = parseInt(gvizMatch[2], 10);
+    const d = parseInt(gvizMatch[3], 10);
+    const h = parseInt(gvizMatch[4] || '0', 10);
+    const min = parseInt(gvizMatch[5] || '0', 10);
+    const s = parseInt(gvizMatch[6] || '0', 10);
+    return new Date(y, m, d, h, min, s);
+  }
+  const parsed = new Date(str);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return new Date();
+}
+
+function getLocalDateString(date = new Date(), timeZone = process.env.EVENT_TIMEZONE || 'Asia/Karachi') {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
 function formatSheetDateTime(val) {
   if (!val) return '';
-  const d = new Date(val);
+  const d = parseDateValue(val);
   if (Number.isNaN(d.getTime())) return String(val);
   return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
 }
@@ -348,20 +375,86 @@ function parseCsv(text) {
   const tickets = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r[0]) continue;
-    tickets.push({
-      ticket_code: String(r[0] || '').replace(/^'/, ''),
-      full_name: String(r[1] || ''),
-      email: String(r[2] || ''),
-      phone: String(r[3] || ''),
-      issued_at: String(r[4] || ''),
-      valid_until: String(r[5] || ''),
-      status: String(r[6] || 'valid'),
-      entry_count: Number(r[7] || 0),
-      first_entry_at: String(r[8] || ''),
-      last_entry_at: String(r[9] || ''),
-      email_status: String(r[10] || 'not_sent')
-    });
+    const rawCode = String(r[0] || '').replace(/^'/, '').trim();
+    const rawName = String(r[1] || 'Participant').trim();
+    if (!rawCode || rawCode.length < 8 || rawCode.toLowerCase().includes('ticket id') || rawName.toLowerCase().includes('full name')) continue;
+
+    const baseName = rawName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim() || 'Participant';
+    const val2 = String(r[2] || '').trim();
+    const is11 = val2.includes('@') || (r.length > 9 && !val2.includes('-') && !val2.includes('T') && !val2.includes(':'));
+    const email = is11 ? val2 : '';
+    const phone = is11 ? String(r[3] || '').trim() : '';
+    const issuedRaw = (is11 ? r[4] : val2) || new Date().toISOString();
+    const validRaw = (is11 ? r[5] : r[3]) || new Date(Date.now() + 3 * 86400000).toISOString();
+    const status = String((is11 ? r[6] : r[4]) || 'valid').trim();
+    const rawEntriesStr = String((is11 ? r[7] : r[5]) || '').trim();
+    const firstEntry = (is11 ? r[8] : r[6]) || null;
+    const lastEntry = (is11 ? r[9] : r[7]) || null;
+
+    const issuedDate = parseDateValue(issuedRaw);
+    const validDate = parseDateValue(validRaw);
+    const issuedIso = issuedDate.toISOString();
+    const validIso = validDate.toISOString();
+
+    const dayMatches = Array.from(rawCode.matchAll(/Day\s*(\d+)\s*:\s*([A-Za-z0-9]{8,32})/gi));
+    if (dayMatches.length > 0) {
+      const seenDays = new Map();
+      for (const m of dayMatches) {
+        const d = parseInt(m[1], 10);
+        if (!seenDays.has(d)) seenDays.set(d, m[2].toUpperCase());
+      }
+      for (const [dayNum, passCode] of seenDays.entries()) {
+        const dayEntryMatch = rawEntriesStr.match(new RegExp(`Day\\s*${dayNum}\\s*:\\s*(\\d+)`, 'i'));
+        let dayEntries = 0;
+        if (dayEntryMatch) {
+          dayEntries = parseInt(dayEntryMatch[1], 10) || 0;
+        } else if (status.toLowerCase().includes(`day ${dayNum} entered`) || status.toLowerCase().includes(`day${dayNum} entered`)) {
+          dayEntries = 1;
+        } else if (status.toLowerCase().includes('completed')) {
+          dayEntries = 1;
+        } else {
+          const firstIntMatch = rawEntriesStr.match(/^(\d+)/);
+          if (firstIntMatch && dayNum === 1 && parseInt(firstIntMatch[1], 10) > 0) dayEntries = 1;
+        }
+
+        const passDate = new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
+        const eventDateStr = getLocalDateString(passDate);
+
+        tickets.push({
+          ticket_code: passCode,
+          full_name: `${baseName} (Day ${dayNum})`,
+          email,
+          phone,
+          issued_at: issuedIso,
+          valid_until: validIso,
+          event_date: eventDateStr,
+          status: status === 'cancelled' ? 'cancelled' : (dayEntries >= 1 ? 'checked_in' : 'valid'),
+          entry_count: dayEntries,
+          first_entry_at: dayEntries >= 1 ? (firstEntry || issuedIso) : null,
+          last_entry_at: dayEntries >= 1 ? (lastEntry || firstEntry || issuedIso) : null,
+          email_status: 'not_sent',
+          max_days: 1
+        });
+      }
+    } else {
+      const singleEntryCount = parseInt(rawEntriesStr.replace(/^[^\d]*/, ''), 10) || (status.toLowerCase().includes('entered') || status.toLowerCase().includes('checked_in') ? 1 : 0);
+      const eventDateStr = getLocalDateString(issuedDate);
+      tickets.push({
+        ticket_code: rawCode.toUpperCase(),
+        full_name: rawName,
+        email,
+        phone,
+        issued_at: issuedIso,
+        valid_until: validIso,
+        event_date: eventDateStr,
+        status: status === 'cancelled' ? 'cancelled' : (singleEntryCount >= 1 ? 'checked_in' : status),
+        entry_count: singleEntryCount,
+        first_entry_at: singleEntryCount >= 1 ? (firstEntry || issuedIso) : null,
+        last_entry_at: singleEntryCount >= 1 ? (lastEntry || firstEntry || issuedIso) : null,
+        email_status: 'not_sent',
+        max_days: 1
+      });
+    }
   }
   return tickets;
 }

@@ -80,6 +80,13 @@ function getLocalTickets() {
       }
     }
   } catch {}
+  const now = new Date();
+  const day1DateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const d2Obj = new Date(now.getTime() + 86400000);
+  const day2DateStr = `${d2Obj.getFullYear()}-${String(d2Obj.getMonth() + 1).padStart(2, '0')}-${String(d2Obj.getDate()).padStart(2, '0')}`;
+  const d3Obj = new Date(now.getTime() + 2 * 86400000);
+  const day3DateStr = `${d3Obj.getFullYear()}-${String(d3Obj.getMonth() + 1).padStart(2, '0')}-${String(d3Obj.getDate()).padStart(2, '0')}`;
+  const validUntilStr = new Date(now.getTime() + 30 * 86400000).toISOString();
   return [
     {
       id: 1,
@@ -87,8 +94,9 @@ function getLocalTickets() {
       email: 'saimmalik4728@gmail.com',
       phone: '03287617476',
       ticket_code: '720F8E1D323E64A4',
-      issued_at: '2026-11-09T14:18:21.829Z',
-      valid_until: '2026-11-12T14:18:21.829Z',
+      issued_at: now.toISOString(),
+      valid_until: validUntilStr,
+      event_date: day1DateStr,
       entry_count: 0,
       first_entry_at: null,
       last_entry_at: null,
@@ -101,8 +109,9 @@ function getLocalTickets() {
       email: 'saimmalik4728@gmail.com',
       phone: '03287617476',
       ticket_code: '99151C9C3B36D4FA',
-      issued_at: '2026-11-09T14:18:21.829Z',
-      valid_until: '2026-11-12T14:18:21.829Z',
+      issued_at: now.toISOString(),
+      valid_until: validUntilStr,
+      event_date: day2DateStr,
       entry_count: 0,
       first_entry_at: null,
       last_entry_at: null,
@@ -115,8 +124,9 @@ function getLocalTickets() {
       email: 'saimmalik4728@gmail.com',
       phone: '03287617476',
       ticket_code: '637990B2FD9603D1',
-      issued_at: '2026-11-09T14:18:21.829Z',
-      valid_until: '2026-11-12T14:18:21.829Z',
+      issued_at: now.toISOString(),
+      valid_until: validUntilStr,
+      event_date: day3DateStr,
       entry_count: 0,
       first_entry_at: null,
       last_entry_at: null,
@@ -140,10 +150,29 @@ function extractTicketCode(raw) {
   return text.replace(/^(?:CAIPSD\|TICKET\|)?/i, '').trim().toUpperCase();
 }
 
+function parseDateValue(val) {
+  if (!val) return new Date();
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? new Date() : val;
+  const str = String(val).trim();
+  const gvizMatch = str.match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/i);
+  if (gvizMatch) {
+    const y = parseInt(gvizMatch[1], 10);
+    const m = parseInt(gvizMatch[2], 10);
+    const d = parseInt(gvizMatch[3], 10);
+    const h = parseInt(gvizMatch[4] || '0', 10);
+    const min = parseInt(gvizMatch[5] || '0', 10);
+    const s = parseInt(gvizMatch[6] || '0', 10);
+    return new Date(y, m, d, h, min, s);
+  }
+  const parsed = new Date(str);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return new Date();
+}
+
 function isSameCalendarDay(d1, d2) {
   if (!d1 || !d2) return false;
-  const a = new Date(d1);
-  const b = new Date(d2);
+  const a = parseDateValue(d1);
+  const b = parseDateValue(d2);
   if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return false;
   const localMatch = a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   const utcMatch = a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth() && a.getUTCDate() === b.getUTCDate();
@@ -152,19 +181,16 @@ function isSameCalendarDay(d1, d2) {
 
 function getLocalDateString(date = new Date(), timeZone = 'Asia/Karachi') {
   try {
-    const d = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
-    if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+    const d = parseDateValue(date);
     const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
     const y = parts.find((p) => p.type === 'year')?.value;
     const m = parts.find((p) => p.type === 'month')?.value;
     const day = parts.find((p) => p.type === 'day')?.value;
     if (y && m && day) return `${y}-${m}-${day}`;
-  } catch {}
-  try {
-    const d = new Date(date);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return d.toISOString().slice(0, 10);
   } catch {
-    return new Date().toISOString().slice(0, 10);
+    const d = parseDateValue(date);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 }
 
@@ -497,11 +523,15 @@ async function syncTicketsFromGoogleSheet() {
 
         const baseName = rawName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim() || 'Participant';
         const val2 = getV(c[2]);
-        const is11 = val2.includes('@') || (c.length > 9 && !val2.includes('-') && !val2.includes('T'));
+        const is11 = val2.includes('@') || (c.length > 9 && !val2.includes('-') && !val2.includes('T') && !val2.includes(':'));
         const email = is11 ? val2 : '';
         const phone = is11 ? getV(c[3]) : '';
-        const issued = (is11 ? getV(c[4]) : val2) || new Date().toISOString();
-        const valid = (is11 ? getV(c[5]) : getV(c[3])) || new Date(Date.now() + 3 * 86400000).toISOString();
+        const rawIssued = (is11 ? getV(c[4]) : val2) || new Date().toISOString();
+        const rawValid = (is11 ? getV(c[5]) : getV(c[3])) || new Date(Date.now() + 3 * 86400000).toISOString();
+        const issuedDate = parseDateValue(rawIssued);
+        const validDate = parseDateValue(rawValid);
+        const issued = issuedDate.toISOString();
+        const valid = validDate.toISOString();
         const status = (is11 ? getV(c[6]) : getV(c[4])) || 'valid';
         const rawEntriesStr = String((is11 ? getV(c[7]) : getV(c[5])) || '').trim();
         const firstEntry = (is11 ? getV(c[8]) : getV(c[6])) || null;
@@ -531,6 +561,8 @@ async function syncTicketsFromGoogleSheet() {
                 dayEntries = 1;
               }
             }
+            const passDate = new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
+            const eventDateStr = getLocalDateString(passDate);
             return {
               id: Date.now() + i * 100 + dIdx,
               ticket_code: code,
@@ -539,6 +571,7 @@ async function syncTicketsFromGoogleSheet() {
               phone,
               issued_at: issued,
               valid_until: valid,
+              event_date: eventDateStr,
               status: status === 'cancelled' ? 'cancelled' : (dayEntries >= 1 ? 'checked_in' : 'valid'),
               entry_count: dayEntries,
               first_entry_at: dayEntries >= 1 ? (firstEntry || issued) : null,
@@ -558,6 +591,7 @@ async function syncTicketsFromGoogleSheet() {
           phone,
           issued_at: issued,
           valid_until: valid,
+          event_date: getLocalDateString(issuedDate),
           status: status === 'cancelled' ? 'cancelled' : (singleEntryCount >= 1 ? 'checked_in' : status),
           entry_count: singleEntryCount,
           first_entry_at: singleEntryCount >= 1 ? (firstEntry || issued) : null,
@@ -877,11 +911,23 @@ async function handleStaticApi(url, options = {}) {
     try {
       const synced = await syncTicketsFromGoogleSheet();
       if (synced && synced.length) {
-        list = synced;
+        for (const s of synced) {
+          const idx = list.findIndex((x) => x.ticket_code && x.ticket_code.toUpperCase() === s.ticket_code.toUpperCase());
+          if (idx >= 0) {
+            list[idx] = { ...list[idx], ...s };
+          } else {
+            list.push(s);
+          }
+        }
+        saveLocalTickets(list);
         const fresh = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === code);
         if (fresh) t = fresh;
       }
     } catch {}
+
+    if (!t) {
+      t = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase().includes(code));
+    }
 
     if (!t) {
       const err = new Error('Ticket not found. This ticket is invalid or was cancelled.');
@@ -897,7 +943,8 @@ async function handleStaticApi(url, options = {}) {
     }
 
     const now = new Date();
-    if (new Date(t.valid_until).getTime() <= now.getTime()) {
+    const validUntilDate = parseDateValue(t.valid_until);
+    if (validUntilDate.getTime() <= now.getTime()) {
       const err = new Error('This ticket has expired.');
       err.status = 410;
       err.data = { ticket: t };
@@ -918,53 +965,39 @@ async function handleStaticApi(url, options = {}) {
     let currentEventDay = 1;
     if (body.activeDay && body.activeDay !== 'auto') {
       currentEventDay = Math.max(1, parseInt(body.activeDay, 10) || 1);
+      if (currentEventDay < passDay) {
+        const err = new Error(`Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`);
+        err.status = 409;
+        err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay, alreadyUsed: false, maxDays };
+        throw err;
+      }
+      if (dayMatch && passDay < currentEventDay) {
+        const err = new Error(`Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`);
+        err.status = 409;
+        err.data = { ticket: t, dayExpired: true, passDay, currentEventDay, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
+        throw err;
+      }
     } else {
       const todayStr = getLocalDateString(now);
-      if (t.event_date && /^\d{4}-\d{2}-\d{2}$/.test(t.event_date)) {
-        if (todayStr < t.event_date) {
-          const err = new Error(`Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`);
-          err.status = 409;
-          err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay: 0, alreadyUsed: false, maxDays };
-          throw err;
-        }
-        if (todayStr > t.event_date) {
-          const err = new Error(`Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`);
-          err.status = 409;
-          err.data = { ticket: t, dayExpired: true, passDay, currentEventDay: 999, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
-          throw err;
-        }
-        currentEventDay = passDay;
-      } else {
-        const issuedStr = getLocalDateString(new Date(t.issued_at));
-        let earliestEntryDate = null;
-        for (const item of list) {
-          if (item.first_entry_at) {
-            const ed = getLocalDateString(new Date(item.first_entry_at));
-            if (!earliestEntryDate || ed < earliestEntryDate) earliestEntryDate = ed;
-          }
-        }
-        const day1Date = earliestEntryDate || issuedStr;
-        try {
-          const d1 = new Date(day1Date + 'T00:00:00');
-          const dt = new Date(todayStr + 'T00:00:00');
-          const diffDays = Math.floor((dt - d1) / (24 * 60 * 60 * 1000));
-          currentEventDay = Math.max(1, diffDays + 1);
-        } catch {}
+      let ticketEventDate = t.event_date;
+      if (!ticketEventDate || !/^\d{4}-\d{2}-\d{2}$/.test(ticketEventDate)) {
+        const issuedDate = parseDateValue(t.issued_at);
+        ticketEventDate = getLocalDateString(new Date(issuedDate.getTime() + (passDay - 1) * 86400000));
       }
-    }
 
-    if (currentEventDay < passDay) {
-      const err = new Error(`Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`);
-      err.status = 409;
-      err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay, alreadyUsed: false, maxDays };
-      throw err;
-    }
-
-    if (dayMatch && passDay < currentEventDay) {
-      const err = new Error(`Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`);
-      err.status = 409;
-      err.data = { ticket: t, dayExpired: true, passDay, currentEventDay, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
-      throw err;
+      if (todayStr < ticketEventDate) {
+        const err = new Error(`Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`);
+        err.status = 409;
+        err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay: 0, alreadyUsed: false, maxDays };
+        throw err;
+      }
+      if (todayStr > ticketEventDate) {
+        const err = new Error(`Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`);
+        err.status = 409;
+        err.data = { ticket: t, dayExpired: true, passDay, currentEventDay: 999, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
+        throw err;
+      }
+      currentEventDay = passDay;
     }
 
     // 1-scan-per-calendar-day enforcement: check both local timezone and UTC date
