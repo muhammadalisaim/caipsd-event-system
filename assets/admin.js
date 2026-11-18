@@ -2847,59 +2847,9 @@ async function triggerSheetsSync() {
   }
 }
 $('#quick-sheet-sync')?.addEventListener('click', triggerSheetsSync);
-async function checkGateStatus() {
-  if (isStaticHost) return;
-  try {
-    const res = await api('/api/gate/status');
-    const isAuth = Boolean(res && res.authorized);
-    const lockBanner = $('#gate-lock-banner');
-    const unlockedBanner = $('#gate-unlocked-banner');
-    if (lockBanner && unlockedBanner) {
-      if (isAuth) {
-        lockBanner.style.display = 'none';
-        unlockedBanner.style.display = 'flex';
-      } else {
-        lockBanner.style.display = 'flex';
-        unlockedBanner.style.display = 'none';
-      }
-    }
-  } catch (err) {
-    console.warn('Gate status check:', err.message);
-  }
-}
-
-$('#gate-unlock-form')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const pinInput = $('#gate-pin-input');
-  const pin = (pinInput ? pinInput.value : '').trim();
-  if (!pin) return;
-  try {
-    const res = await api('/api/gate/authorize', {
-      method: 'POST',
-      body: JSON.stringify({ pin })
-    });
-    toast(`✓ ${res.message || 'Gate Station unlocked!'}`);
-    if (pinInput) pinInput.value = '';
-    await checkGateStatus();
-  } catch (err) {
-    toast(`Gate Unlock failed: ${err.message}`, 'error');
-  }
-});
-
-$('#btn-gate-lock')?.addEventListener('click', async () => {
-  try {
-    await api('/api/gate/lock', { method: 'POST' });
-    toast('Gate Station locked.');
-    await checkGateStatus();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-});
-
 (async function initialize() {
   if (isStaticHost) {
     syncTicketsFromGoogleSheet().catch(() => {});
   }
-  checkGateStatus().catch(() => {});
   try { const data = await api('/api/admin/me'); showApp(data.admin.email); } catch { showLogin(); }
 })();

@@ -573,49 +573,6 @@ test('tickets pagination: supports page and limit parameters, returns total and 
   assert.equal(p3.data.page, 3);
 });
 
-test('gate station authorization endpoints: authorize with PIN, status check, and lock', async () => {
-  let gateCookie = '';
-  const gateCall = async (path, opts = {}) => {
-    const res = await fetch(base + path, {
-      method: opts.method || 'GET',
-      headers: {
-        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(gateCookie ? { Cookie: gateCookie } : {})
-      },
-      body: opts.body ? JSON.stringify(opts.body) : undefined
-    });
-    const setCookie = res.headers.get('set-cookie');
-    if (setCookie) gateCookie = setCookie.split(';')[0];
-    const type = res.headers.get('content-type') || '';
-    return { status: res.status, data: type.includes('json') ? await res.json() : await res.text() };
-  };
-
-  // Initially unauthenticated
-  const statusBefore = await gateCall('/api/gate/status');
-  assert.equal(statusBefore.data.authorized, false);
-
-  // Attempt unlock with invalid PIN
-  const wrongUnlock = await gateCall('/api/gate/authorize', { method: 'POST', body: { pin: '0000' } });
-  assert.equal(wrongUnlock.status, 401);
-
-  // Unlock with correct Gate PIN ('2211')
-  const okUnlock = await gateCall('/api/gate/authorize', { method: 'POST', body: { pin: '2211' } });
-  assert.equal(okUnlock.status, 200);
-  assert.equal(okUnlock.data.success, true);
-
-  // Station is now authorized
-  const statusAfter = await gateCall('/api/gate/status');
-  assert.equal(statusAfter.data.authorized, true);
-
-  // Lock station
-  const lockRes = await gateCall('/api/gate/lock', { method: 'POST' });
-  assert.equal(lockRes.status, 200);
-
-  // Station is locked again
-  const statusLocked = await gateCall('/api/gate/status');
-  assert.equal(statusLocked.data.authorized, false);
-});
-
 
 
 

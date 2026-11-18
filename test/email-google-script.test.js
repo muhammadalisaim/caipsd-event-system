@@ -131,34 +131,27 @@ test('a ticket can still be created without emailing', async () => {
   assert.equal(emailCalls().length, before);
 });
 
-test('gate check-in requires gate PIN or admin login when locked', async () => {
-  const locked = await call('/api/check-in', { method: 'POST', auth: false, body: { ticketCode: '0123456789ABCDEF' } });
-  assert.equal(locked.status, 401);
-  assert.equal(locked.data.gateLocked, true);
-});
-
 test('gate check-in verifies tickets in SQLite and rejects sheet-only unverified tickets (prevents forgery)', async () => {
   const future = new Date(Date.now() + 86400000).toISOString();
   sheetRows = [
     { ticket_code: 'AAAAAAAAAAAAAAAA', full_name: 'Cancelled Person', email: 'cancelled@example.com', phone: '1', issued_at: new Date().toISOString(), valid_until: future, status: 'Cancelled', entry_count: 0 },
     { ticket_code: 'BBBBBBBBBBBBBBBB', full_name: 'Sheet Only Person', email: 'sheet@example.com', phone: '2', issued_at: new Date().toISOString(), valid_until: future, status: 'valid', entry_count: 0 }
   ];
-  const gateHeaders = { 'x-gate-pin': '2211' };
 
-  const sheetOnly = await call('/api/check-in', { method: 'POST', auth: false, headers: gateHeaders, body: { ticketCode: 'BBBBBBBBBBBBBBBB' } });
+  const sheetOnly = await call('/api/check-in', { method: 'POST', auth: false, body: { ticketCode: 'BBBBBBBBBBBBBBBB' } });
   assert.equal(sheetOnly.status, 404);
 
   const db = require('../db').db;
   db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, max_days, event_date) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)`).run(
     'Legit Participant', 'legit@example.com', '123', 'CCCCCCCCCCCCCCCC', new Date().toISOString(), future, '2026-11-18'
   );
-  const fine = await call('/api/check-in', { method: 'POST', auth: false, headers: gateHeaders, body: { ticketCode: 'CCCCCCCCCCCCCCCC' } });
+  const fine = await call('/api/check-in', { method: 'POST', auth: false, body: { ticketCode: 'CCCCCCCCCCCCCCCC' } });
   assert.equal(fine.status, 200);
   assert.equal(fine.data.ticket.full_name, 'Legit Participant');
 });
 
 test('public check-in is rate limited and reports a clear error for unknown codes', async () => {
-  const r = await call('/api/check-in', { method: 'POST', auth: false, headers: { 'x-gate-pin': '2211' }, body: { ticketCode: '0123456789ABCDEF' } });
+  const r = await call('/api/check-in', { method: 'POST', auth: false, body: { ticketCode: '0123456789ABCDEF' } });
   assert.equal(r.status, 404);
   assert.match(r.data.error, /not found/i);
   assert.ok(r.headers.get('ratelimit') || r.headers.get('ratelimit-policy'), 'rate-limit headers present');

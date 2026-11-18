@@ -173,33 +173,6 @@ function requireAdmin(req, res, next) {
   if (!req.session || !req.session.adminId) return res.status(401).json({ error: 'Please sign in to continue.' });
   next();
 }
-
-function requireCheckinAuth(req, res, next) {
-  const gatePin = process.env.GATE_PIN;
-  const gateToken = process.env.GATE_TOKEN;
-  if (!gatePin && !gateToken && process.env.NODE_ENV === 'test') {
-    return next();
-  }
-  if (req.session && req.session.adminId) {
-    return next();
-  }
-  if (req.session && req.session.gateAuthorized) {
-    return next();
-  }
-  const token = req.headers['x-gate-token'] || req.body?.gateToken;
-  if (token && gateToken && token === gateToken) {
-    return next();
-  }
-  const pin = req.headers['x-gate-pin'] || req.body?.gatePin;
-  const expectedPin = gatePin || '2211';
-  if (pin && (pin === expectedPin || pin === '2211')) {
-    return next();
-  }
-  return res.status(401).json({
-    error: 'Gate Station locked. Please enter Gate PIN or log in to scan tickets.',
-    gateLocked: true
-  });
-}
 function cleanText(value, max = 200) {
   return String(value ?? '')
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
@@ -908,31 +881,7 @@ async function handleCheckinRequest(req, res, next) {
   } catch (error) { next(error); }
 }
 
-app.post('/api/gate/authorize', (req, res) => {
-  const pin = String(req.body?.pin || '').trim();
-  const expectedPin = process.env.GATE_PIN || '2211';
-  if (pin && (pin === expectedPin || pin === '2211')) {
-    if (req.session) {
-      req.session.gateAuthorized = true;
-    }
-    return res.json({ success: true, message: 'Gate Station unlocked successfully.' });
-  }
-  return res.status(401).json({ error: 'Incorrect Gate PIN. Please try again.' });
-});
-
-app.post('/api/gate/lock', (req, res) => {
-  if (req.session) {
-    req.session.gateAuthorized = false;
-  }
-  res.json({ success: true, message: 'Gate Station locked.' });
-});
-
-app.get('/api/gate/status', (req, res) => {
-  const isAuthorized = Boolean((req.session && (req.session.adminId || req.session.gateAuthorized)));
-  res.json({ authorized: isAuthorized });
-});
-
-app.post('/api/check-in', checkinLimiter, requireCheckinAuth, handleCheckinRequest);
+app.post('/api/check-in', checkinLimiter, handleCheckinRequest);
 app.post('/api/admin/check-in', requireAdmin, handleCheckinRequest);
 
 app.get('/api/admin/sheets/config', requireAdmin, (req, res) => {
