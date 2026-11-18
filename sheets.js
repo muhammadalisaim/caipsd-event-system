@@ -50,7 +50,19 @@ function getSheetsConfig() {
 
 function saveSheetsConfig(data) {
   if (data.webhookUrl !== undefined) {
-    setSetting('google_sheets_webhook_url', String(data.webhookUrl || '').trim());
+    const trimmed = String(data.webhookUrl || '').trim();
+    if (trimmed) {
+      try {
+        const parsed = new URL(trimmed);
+        const host = parsed.hostname.toLowerCase();
+        if (host !== 'script.google.com' && !host.endsWith('.script.google.com') && host !== '127.0.0.1' && host !== 'localhost') {
+          throw new Error('Webhook URL must be hosted on script.google.com');
+        }
+      } catch (err) {
+        throw new Error(err.message.includes('script.google.com') ? err.message : `Invalid Google Sheets Webhook URL: ${err.message}`);
+      }
+    }
+    setSetting('google_sheets_webhook_url', trimmed);
   }
   if (data.autoSync !== undefined) {
     setSetting('google_sheets_auto_sync', data.autoSync ? '1' : '0');
@@ -235,6 +247,21 @@ async function sendWebhook(action, payload = {}) {
   const config = getSheetsConfig();
   if (!config.webhookUrl) {
     throw new Error('Google Sheets Webhook URL is not configured. Please deploy the Apps Script Web App.');
+  }
+
+  try {
+    const parsed = new URL(config.webhookUrl);
+    const host = parsed.hostname.toLowerCase();
+    const isAllowed = host === 'script.google.com' ||
+                      host.endsWith('.script.google.com') ||
+                      host === '127.0.0.1' ||
+                      host === 'localhost';
+    if (!isAllowed) {
+      throw new Error('Google Sheets Webhook URL must be hosted on script.google.com');
+    }
+  } catch (err) {
+    if (err.message.includes('script.google.com')) throw err;
+    throw new Error(`Invalid Google Sheets Webhook URL: ${err.message}`);
   }
 
   const secret = process.env.GOOGLE_WEBHOOK_SECRET || '';
@@ -621,8 +648,13 @@ async function fetchTicketsFromSheet() {
  */
 function getAppsScriptTemplate(customSpreadsheetId) {
   const targetId = customSpreadsheetId || getSheetsConfig().spreadsheetId || PERMANENT_SPREADSHEET_ID;
-  const source = fs.readFileSync(path.join(__dirname, 'google-apps-script.js'), 'utf8');
-  return source.split(PERMANENT_SPREADSHEET_ID).join(targetId);
+  let source = fs.readFileSync(path.join(__dirname, 'google-apps-script.js'), 'utf8');
+  source = source.split(PERMANENT_SPREADSHEET_ID).join(targetId);
+  const secret = process.env.GOOGLE_WEBHOOK_SECRET || '';
+  if (secret) {
+    source = source.replace(/var WEBHOOK_SECRET = "[^"]*";/, `var WEBHOOK_SECRET = "${secret}";`);
+  }
+  return source;
 }
 
 module.exports = {

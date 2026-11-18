@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, 'data', 'caipsd.sqlite');
@@ -134,6 +135,44 @@ function initializeAdmin(email, password) {
   }
 }
 
+function getEncryptionKey() {
+  const secret = process.env.SESSION_SECRET || 'caipsd_default_encryption_secret_key_32b';
+  return crypto.createHash('sha256').update(secret).digest();
+}
+
+function encryptSecret(plainText) {
+  if (plainText === null || plainText === undefined) return '';
+  const str = String(plainText);
+  if (!str) return '';
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(str, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `enc:gcm:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+function decryptSecret(cipherText) {
+  if (!cipherText) return '';
+  const str = String(cipherText);
+  if (!str.startsWith('enc:gcm:')) {
+    return str;
+  }
+  try {
+    const parts = str.split(':');
+    if (parts.length !== 5) return str;
+    const iv = Buffer.from(parts[2], 'hex');
+    const authTag = Buffer.from(parts[3], 'hex');
+    const encrypted = Buffer.from(parts[4], 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', getEncryptionKey(), iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decrypted.toString('utf8');
+  } catch (err) {
+    console.error('Failed to decrypt secret:', err.message);
+    return '';
+  }
+}
+
 let stmtGetSetting;
 let stmtSetSetting;
 
@@ -141,7 +180,11 @@ function getSetting(key, defaultValue = null) {
   try {
     if (!stmtGetSetting) stmtGetSetting = db.prepare('SELECT value FROM settings WHERE key = ?');
     const row = stmtGetSetting.get(key);
-    return row ? row.value : defaultValue;
+    if (!row) return defaultValue;
+    if (key === 'smtp_pass') {
+      return decryptSecret(row.value) || defaultValue;
+    }
+    return row.value;
   } catch {
     return defaultValue;
   }
@@ -155,7 +198,11 @@ function setSetting(key, value) {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
     `);
   }
-  stmtSetSetting.run(key, String(value ?? ''));
+  let valToStore = String(value ?? '');
+  if (key === 'smtp_pass' && valToStore) {
+    valToStore = encryptSecret(valToStore);
+  }
+  stmtSetSetting.run(key, valToStore);
 }
 
 function deleteSetting(key) {
@@ -204,6 +251,8 @@ module.exports = {
   deleteSetting,
   isTicketCancelled,
   recordTicketCancelled,
-  updateAdminPassword
+  updateAdminPassword,
+  encryptSecret,
+  decryptSecret
 };
 

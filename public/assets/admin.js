@@ -1768,7 +1768,11 @@ function bindTicketsTableEvents(container, groups) {
   });
 }
 
-async function loadTickets() {
+let currentTicketsPage = 1;
+let currentTicketsLimit = 50;
+
+async function loadTickets(page = currentTicketsPage) {
+  currentTicketsPage = Math.max(1, Number(page) || 1);
   if (isStaticHost) {
     try { await syncTicketsFromGoogleSheet(); } catch {}
   }
@@ -1777,16 +1781,42 @@ async function loadTickets() {
   const status = $('#filter-status').value;
   if (q) params.set('q', q);
   if (status) params.set('status', status);
+  params.set('page', String(currentTicketsPage));
+  params.set('limit', String(currentTicketsLimit));
   try {
     const data = await api(`/api/admin/tickets?${params.toString()}`);
     currentTicketsGroups = [];
     const container = $('#tickets-table');
-    container.innerHTML = ticketsTable(data.tickets, true, currentTicketsGroups);
+    const tickets = Array.isArray(data.tickets) ? data.tickets : [];
+    container.innerHTML = ticketsTable(tickets, true, currentTicketsGroups);
     bindTicketsTableEvents(container, currentTicketsGroups);
+
+    const total = Number(data.total ?? tickets.length);
+    const pages = Math.max(1, Number(data.pages ?? Math.ceil(total / currentTicketsLimit)) || 1);
+    const startIdx = total === 0 ? 0 : (currentTicketsPage - 1) * currentTicketsLimit + 1;
+    const endIdx = Math.min(total, currentTicketsPage * currentTicketsLimit);
+
+    if ($('#pag-start')) $('#pag-start').textContent = String(startIdx);
+    if ($('#pag-end')) $('#pag-end').textContent = String(endIdx);
+    if ($('#pag-total')) $('#pag-total').textContent = String(total);
+    if ($('#pag-current-page')) $('#pag-current-page').textContent = `${currentTicketsPage} / ${pages}`;
+    if ($('#btn-page-prev')) $('#btn-page-prev').disabled = currentTicketsPage <= 1;
+    if ($('#btn-page-next')) $('#btn-page-next').disabled = currentTicketsPage >= pages;
   } catch (error) { $('#tickets-table').innerHTML = `<div class="empty-table">${escapeHtml(error.message)}</div>`; }
 }
-$('#search-tickets').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadTickets, 250); });
-$('#filter-status').addEventListener('change', loadTickets);
+$('#search-tickets').addEventListener('input', () => { currentTicketsPage = 1; clearTimeout(searchTimer); searchTimer = setTimeout(() => loadTickets(1), 250); });
+$('#filter-status').addEventListener('change', () => { currentTicketsPage = 1; loadTickets(1); });
+$('#pagination-limit')?.addEventListener('change', (e) => {
+  currentTicketsLimit = parseInt(e.target.value, 10) || 50;
+  currentTicketsPage = 1;
+  loadTickets(1);
+});
+$('#btn-page-prev')?.addEventListener('click', () => {
+  if (currentTicketsPage > 1) loadTickets(currentTicketsPage - 1);
+});
+$('#btn-page-next')?.addEventListener('click', () => {
+  loadTickets(currentTicketsPage + 1);
+});
 
 async function exportCsv() {
   try {
@@ -2817,11 +2847,59 @@ async function triggerSheetsSync() {
   }
 }
 $('#quick-sheet-sync')?.addEventListener('click', triggerSheetsSync);
-$('#btn-sync-tickets-sheets')?.addEventListener('click', triggerSheetsSync);
+async function checkGateStatus() {
+  if (isStaticHost) return;
+  try {
+    const res = await api('/api/gate/status');
+    const isAuth = Boolean(res && res.authorized);
+    const lockBanner = $('#gate-lock-banner');
+    const unlockedBanner = $('#gate-unlocked-banner');
+    if (lockBanner && unlockedBanner) {
+      if (isAuth) {
+        lockBanner.style.display = 'none';
+        unlockedBanner.style.display = 'flex';
+      } else {
+        lockBanner.style.display = 'flex';
+        unlockedBanner.style.display = 'none';
+      }
+    }
+  } catch (err) {
+    console.warn('Gate status check:', err.message);
+  }
+}
+
+$('#gate-unlock-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pinInput = $('#gate-pin-input');
+  const pin = (pinInput ? pinInput.value : '').trim();
+  if (!pin) return;
+  try {
+    const res = await api('/api/gate/authorize', {
+      method: 'POST',
+      body: JSON.stringify({ pin })
+    });
+    toast(`✓ ${res.message || 'Gate Station unlocked!'}`);
+    if (pinInput) pinInput.value = '';
+    await checkGateStatus();
+  } catch (err) {
+    toast(`Gate Unlock failed: ${err.message}`, 'error');
+  }
+});
+
+$('#btn-gate-lock')?.addEventListener('click', async () => {
+  try {
+    await api('/api/gate/lock', { method: 'POST' });
+    toast('Gate Station locked.');
+    await checkGateStatus();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+});
 
 (async function initialize() {
   if (isStaticHost) {
     syncTicketsFromGoogleSheet().catch(() => {});
   }
+  checkGateStatus().catch(() => {});
   try { const data = await api('/api/admin/me'); showApp(data.admin.email); } catch { showLogin(); }
 })();

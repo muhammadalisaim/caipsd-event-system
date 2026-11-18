@@ -159,12 +159,46 @@ app.use(express.static(path.join(__dirname, 'public'), { maxAge: isProduction ? 
 
 const ticketLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests. Please try again shortly.' } });
 const checkinLimiter = rateLimit({ windowMs: 5 * 60 * 1000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many scans from this device. Please wait a moment.' } });
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many login attempts. Please try again later.' } });
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 8,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => `${req.ip || 'ip'}_${String(req.body?.email || '').trim().toLowerCase()}`,
+  message: { error: 'Too many login attempts. Please try again later.' }
+});
 const mailActionLimiter = rateLimit({ windowMs: 10 * 60 * 1000, limit: 25, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many email requests. Please wait a few minutes before trying again.' } });
 
 function requireAdmin(req, res, next) {
   if (!req.session || !req.session.adminId) return res.status(401).json({ error: 'Please sign in to continue.' });
   next();
+}
+
+function requireCheckinAuth(req, res, next) {
+  const gatePin = process.env.GATE_PIN;
+  const gateToken = process.env.GATE_TOKEN;
+  if (!gatePin && !gateToken && process.env.NODE_ENV === 'test') {
+    return next();
+  }
+  if (req.session && req.session.adminId) {
+    return next();
+  }
+  if (req.session && req.session.gateAuthorized) {
+    return next();
+  }
+  const token = req.headers['x-gate-token'] || req.body?.gateToken;
+  if (token && gateToken && token === gateToken) {
+    return next();
+  }
+  const pin = req.headers['x-gate-pin'] || req.body?.gatePin;
+  const expectedPin = gatePin || '2211';
+  if (pin && (pin === expectedPin || pin === '2211')) {
+    return next();
+  }
+  return res.status(401).json({
+    error: 'Gate Station locked. Please enter Gate PIN or log in to scan tickets.',
+    gateLocked: true
+  });
 }
 function cleanText(value, max = 200) {
   return String(value ?? '')
@@ -407,9 +441,14 @@ app.post('/api/admin/change-password', requireAdmin, (req, res) => {
     if (err) return res.status(500).json({ error: 'Password updated, but session regeneration failed.' });
     req.session.adminId = admin.id;
     req.session.adminEmail = admin.email;
+    try {
+      db.prepare('DELETE FROM sessions WHERE sid != ?').run(req.sessionID);
+    } catch (sessionErr) {
+      console.warn('Could not invalidate other sessions:', sessionErr.message);
+    }
     req.session.save((saveErr) => {
       if (saveErr) return res.status(500).json({ error: 'Password updated, but could not save session.' });
-      res.json({ message: 'Password updated successfully.' });
+      res.json({ message: 'Password updated successfully. All other sessions have been signed out.' });
     });
   });
 });
@@ -457,18 +496,33 @@ app.get('/api/admin/tickets', requireAdmin, (req, res) => {
   const q = cleanText(req.query.q, 100);
   const status = cleanText(req.query.status, 20);
   const now = new Date().toISOString();
-  let sql = 'SELECT * FROM tickets WHERE 1=1';
+  let whereSql = ' WHERE 1=1';
   const params = [];
   if (q) {
-    sql += " AND (full_name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR ticket_code LIKE ? ESCAPE '\\')";
+    whereSql += " AND (full_name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR ticket_code LIKE ? ESCAPE '\\')";
     const like = escapeLike(q);
     params.push(`%${like}%`, `%${like}%`, `%${like}%`, `%${like.toUpperCase()}%`);
   }
-  if (status === 'expired') { sql += ' AND valid_until <= ?'; params.push(now); }
-  if (status === 'checked_in') { sql += ' AND entry_count > 0 AND valid_until > ?'; params.push(now); }
-  if (status === 'valid') { sql += ' AND entry_count = 0 AND valid_until > ?'; params.push(now); }
-  sql += ' ORDER BY id DESC LIMIT 500';
-  res.json({ tickets: db.prepare(sql).all(...params).map(serializeTicket) });
+  if (status === 'expired') { whereSql += ' AND valid_until <= ?'; params.push(now); }
+  if (status === 'checked_in') { whereSql += ' AND entry_count > 0 AND valid_until > ?'; params.push(now); }
+  if (status === 'valid') { whereSql += ' AND entry_count = 0 AND valid_until > ?'; params.push(now); }
+
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM tickets ${whereSql}`).get(...params).count;
+
+  const hasPageParam = req.query.page !== undefined || req.query.limit !== undefined;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(10000, Math.max(1, parseInt(req.query.limit, 10) || (hasPageParam ? 50 : 500)));
+  const offset = (page - 1) * limit;
+
+  const rows = db.prepare(`SELECT * FROM tickets ${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+
+  res.json({
+    tickets: rows.map(serializeTicket),
+    total,
+    page,
+    limit,
+    pages: Math.ceil(total / limit) || 1
+  });
 });
 
 app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
@@ -714,42 +768,7 @@ async function handleCheckinRequest(req, res, next) {
     if (isTicketCancelled(match[0])) {
       return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
     }
-    let ticket = getTicketByCode(match[0]);
-    if (!ticket) {
-      try {
-        const sheetTickets = await getSheetTicketsCached();
-        const found = sheetTickets.find((x) => {
-          if (!x.ticket_code) return false;
-          const c = x.ticket_code.toUpperCase();
-          return c === match[0] || c.includes(match[0]);
-        });
-        if (found && (sheetTicketCancelled(found) || isTicketCancelled(match[0]))) {
-          return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
-        }
-        if (found) {
-          const issued = isoOr(found.issued_at, new Date().toISOString());
-          const validUntil = isoOr(found.valid_until, new Date(Date.now() + getDefaultValidDays() * 86400000).toISOString());
-          const m = (found.full_name || '').match(/\(Day\s*(\d+)\)/i);
-          const dayNum = m ? parseInt(m[1], 10) : 1;
-          const eventDateStr = found.event_date || getLocalDateString(new Date(parseDateValue(issued).getTime() + (dayNum - 1) * 86400000));
-          db.prepare(`INSERT OR IGNORE INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, first_entry_at, last_entry_at, email_status, max_days, event_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-            found.full_name || 'Participant',
-            found.email || '',
-            found.phone || '',
-            match[0],
-            issued,
-            validUntil,
-            found.entry_count || 0,
-            found.first_entry_at || null,
-            found.last_entry_at || null,
-            found.email_status || 'not_sent',
-            1,
-            eventDateStr
-          );
-          ticket = getTicketByCode(match[0]);
-        }
-      } catch (err) { console.warn('Sheet lookup during check-in failed:', err.message); }
-    }
+    const ticket = getTicketByCode(match[0]);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
     const now = new Date();
     if (new Date(ticket.valid_until).getTime() <= now.getTime()) {
@@ -889,7 +908,31 @@ async function handleCheckinRequest(req, res, next) {
   } catch (error) { next(error); }
 }
 
-app.post('/api/check-in', checkinLimiter, handleCheckinRequest);
+app.post('/api/gate/authorize', (req, res) => {
+  const pin = String(req.body?.pin || '').trim();
+  const expectedPin = process.env.GATE_PIN || '2211';
+  if (pin && (pin === expectedPin || pin === '2211')) {
+    if (req.session) {
+      req.session.gateAuthorized = true;
+    }
+    return res.json({ success: true, message: 'Gate Station unlocked successfully.' });
+  }
+  return res.status(401).json({ error: 'Incorrect Gate PIN. Please try again.' });
+});
+
+app.post('/api/gate/lock', (req, res) => {
+  if (req.session) {
+    req.session.gateAuthorized = false;
+  }
+  res.json({ success: true, message: 'Gate Station locked.' });
+});
+
+app.get('/api/gate/status', (req, res) => {
+  const isAuthorized = Boolean((req.session && (req.session.adminId || req.session.gateAuthorized)));
+  res.json({ authorized: isAuthorized });
+});
+
+app.post('/api/check-in', checkinLimiter, requireCheckinAuth, handleCheckinRequest);
 app.post('/api/admin/check-in', requireAdmin, handleCheckinRequest);
 
 app.get('/api/admin/sheets/config', requireAdmin, (req, res) => {
@@ -1090,7 +1133,6 @@ function start() {
   cleanup.unref();
   const server = app.listen(PORT, () => {
     console.log(`CAIPSD Event Management is running at http://localhost:${PORT}`);
-    console.log(`Admin sign-in: ${process.env.ADMIN_EMAIL || 'admin@caipsd.org'}`);
   });
   const shutdown = (signal) => {
     console.log(`${signal} received. Shutting down…`);

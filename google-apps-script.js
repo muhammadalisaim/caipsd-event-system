@@ -20,21 +20,19 @@ var TARGET_SPREADSHEET_ID = "12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o";
 var VIEW_BASE_URL = "https://muhammadalisaim.github.io/caipsd-event-system/ticket.html";
 
 /**
- * Master Security Password for Google Spreadsheet & Webhook API
+ * Master Security Password for Google Spreadsheet UI Menu
  */
 var SPREADSHEET_PASSWORD = "Event@2211";
 
 /**
- * OPTIONAL but recommended when you use the Node.js server:
- * put any long random text here AND the same text in .env as GOOGLE_WEBHOOK_SECRET.
- * Then only your server can send emails / read tickets through this script.
- * Leave it empty ("") if you use the GitHub Pages (static) version - the browser cannot keep a secret.
+ * Shared Secret for Webhook & API Authentication.
+ * Must match GOOGLE_WEBHOOK_SECRET in .env.
  */
-var WEBHOOK_SECRET = "";
+var WEBHOOK_SECRET = "efd54c6a16f8347ce86bdcea46d348239b9dedd625a44df6c660ba1ffafba310";
 
 function isAuthorized(secret) {
   if (!WEBHOOK_SECRET) return true;
-  return String(secret || '') === WEBHOOK_SECRET || String(secret || '') === SPREADSHEET_PASSWORD;
+  return Boolean(secret) && String(secret) === WEBHOOK_SECRET;
 }
 
 function escapeHtml(value) {

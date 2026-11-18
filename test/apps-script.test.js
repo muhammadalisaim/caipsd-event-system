@@ -29,6 +29,7 @@ function makeSandbox() {
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'google-apps-script.js'), 'utf8'), context);
+  vm.runInContext('WEBHOOK_SECRET = "";', context);
   return context;
 }
 const post = (ctx, payload) => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(payload) } }).getContent());

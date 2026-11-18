@@ -506,5 +506,116 @@ test('bulk delete tickets by ids and delete all tickets', async () => {
   assert.equal(listAfterAll.data.tickets.length, 0);
 });
 
+test('security: AES-256-GCM encrypts smtp_pass at rest in SQLite and decrypts on retrieval', () => {
+  const { setSetting, getSetting, encryptSecret, decryptSecret } = require('../db');
+  const plainSecret = 'mySecretAppPassword16Char';
+  setSetting('smtp_pass', plainSecret);
+
+  // Directly inspect raw stored value in SQLite table
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'smtp_pass'").get();
+  assert.ok(row.value.startsWith('enc:gcm:'), 'Stored value must be encrypted with enc:gcm: prefix');
+  assert.notEqual(row.value, plainSecret, 'Raw password must never be stored in plain text');
+
+  // getSetting should transparently decrypt
+  assert.equal(getSetting('smtp_pass'), plainSecret);
+
+  // Direct encrypt/decrypt helpers
+  const enc = encryptSecret('helloWorld');
+  assert.ok(enc.startsWith('enc:gcm:'));
+  assert.equal(decryptSecret(enc), 'helloWorld');
+});
+
+test('security: admin password change revokes other active sessions across devices', async () => {
+  // Insert a mock session from a second device
+  db.prepare('INSERT INTO sessions (sid, sess, expired) VALUES (?, ?, ?)').run('other-device-session-xyz', '{"adminId":1}', Date.now() + 3600000);
+  assert.ok(db.prepare("SELECT 1 FROM sessions WHERE sid = 'other-device-session-xyz'").get());
+
+  // Current admin updates password
+  const res = await call('/api/admin/change-password', {
+    method: 'POST',
+    body: { currentPassword: 'TestPassword123!', newPassword: 'BrandNewPassword999!' }
+  });
+  assert.equal(res.status, 200);
+
+  // The other device session must now be revoked
+  const otherSession = db.prepare("SELECT 1 FROM sessions WHERE sid = 'other-device-session-xyz'").get();
+  assert.equal(otherSession, undefined, 'Other device session must be purged from database');
+
+  // Restore original password for remaining tests
+  await call('/api/admin/change-password', {
+    method: 'POST',
+    body: { currentPassword: 'BrandNewPassword999!', newPassword: 'TestPassword123!' }
+  });
+});
+
+test('tickets pagination: supports page and limit parameters, returns total and pages', async () => {
+  // Issue 5 participants (10 passes)
+  for (let i = 1; i <= 5; i++) {
+    await call('/api/admin/tickets', {
+      method: 'POST',
+      body: { fullName: `Attendee ${i}`, sendEmail: false }
+    });
+  }
+
+  // Fetch page 1 with limit 4
+  const p1 = await call('/api/admin/tickets?page=1&limit=4');
+  assert.equal(p1.status, 200);
+  assert.equal(p1.data.tickets.length, 4);
+  assert.equal(p1.data.total, 10);
+  assert.equal(p1.data.page, 1);
+  assert.equal(p1.data.limit, 4);
+  assert.equal(p1.data.pages, 3);
+
+  // Fetch page 3 with limit 4 (should return remaining 2 passes)
+  const p3 = await call('/api/admin/tickets?page=3&limit=4');
+  assert.equal(p3.status, 200);
+  assert.equal(p3.data.tickets.length, 2);
+  assert.equal(p3.data.page, 3);
+});
+
+test('gate station authorization endpoints: authorize with PIN, status check, and lock', async () => {
+  let gateCookie = '';
+  const gateCall = async (path, opts = {}) => {
+    const res = await fetch(base + path, {
+      method: opts.method || 'GET',
+      headers: {
+        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(gateCookie ? { Cookie: gateCookie } : {})
+      },
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) gateCookie = setCookie.split(';')[0];
+    const type = res.headers.get('content-type') || '';
+    return { status: res.status, data: type.includes('json') ? await res.json() : await res.text() };
+  };
+
+  // Initially unauthenticated
+  const statusBefore = await gateCall('/api/gate/status');
+  assert.equal(statusBefore.data.authorized, false);
+
+  // Attempt unlock with invalid PIN
+  const wrongUnlock = await gateCall('/api/gate/authorize', { method: 'POST', body: { pin: '0000' } });
+  assert.equal(wrongUnlock.status, 401);
+
+  // Unlock with correct Gate PIN ('2211')
+  const okUnlock = await gateCall('/api/gate/authorize', { method: 'POST', body: { pin: '2211' } });
+  assert.equal(okUnlock.status, 200);
+  assert.equal(okUnlock.data.success, true);
+
+  // Station is now authorized
+  const statusAfter = await gateCall('/api/gate/status');
+  assert.equal(statusAfter.data.authorized, true);
+
+  // Lock station
+  const lockRes = await gateCall('/api/gate/lock', { method: 'POST' });
+  assert.equal(lockRes.status, 200);
+
+  // Station is locked again
+  const statusLocked = await gateCall('/api/gate/status');
+  assert.equal(statusLocked.data.authorized, false);
+});
+
+
 
 
