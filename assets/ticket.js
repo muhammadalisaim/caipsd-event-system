@@ -141,13 +141,20 @@ async function loadTicket() {
       try { list = JSON.parse(localStorage.getItem('caipsd_tickets') || '[]'); } catch {}
       const found = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === code);
       if (found) {
-        const baseName = String(found.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
-        const issuedMin = (found.issued_at || '').slice(0, 16);
-        const siblings = list.filter((x) => {
-          const xBase = String(x.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
-          const xMin = (x.issued_at || '').slice(0, 16);
-          return xBase === baseName && (!issuedMin || !xMin || xMin === issuedMin);
-        });
+        let siblings = [];
+        if (found.group_id) {
+          siblings = list.filter((x) => x.group_id && x.group_id === found.group_id);
+        } else if (found.email) {
+          const baseName = String(found.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+          const issuedMin = (found.issued_at || '').slice(0, 16);
+          siblings = list.filter((x) => {
+            const xBase = String(x.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+            const xMin = (x.issued_at || '').slice(0, 16);
+            return x.email === found.email && xBase === baseName && (!issuedMin || !xMin || xMin === issuedMin);
+          });
+        } else {
+          siblings = [found];
+        }
         const dayMap = new Map();
         for (const sib of siblings) {
           const m = (sib.full_name || '').match(/\(Day\s*(\d+)\)/i);

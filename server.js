@@ -243,6 +243,11 @@ function ticketStatus(row, now = Date.now()) {
   return 'valid';
 }
 function serializeTicket(row) { return { ...row, status: ticketStatus(row) }; }
+function serializePublicTicket(row) {
+  if (!row) return null;
+  const { email, phone, email_status, emailed_at, email_error, ...rest } = row; // eslint-disable-line no-unused-vars
+  return { ...rest, status: ticketStatus(row) };
+}
 function publicTicket(row) {
   const { id, email, phone, email_status, emailed_at, email_error, ...rest } = row; // eslint-disable-line no-unused-vars
   return { ...rest, status: ticketStatus(row) };
@@ -334,15 +339,21 @@ app.get('/api/ticket/:code', ticketLimiter, async (req, res) => {
   if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
   try {
     const qrDataUrl = await QRCode.toDataURL(code, qrOptions(240));
-    const baseName = ticket.full_name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
-    const issuedMin = (ticket.issued_at || '').slice(0, 16);
-
-    const siblings = db.prepare(`
-      SELECT * FROM tickets
-      WHERE (full_name = ? OR full_name LIKE ?)
-      AND substr(issued_at, 1, 16) = ?
-      ORDER BY full_name ASC, id ASC
-    `).all(baseName, `${baseName} (%`, issuedMin);
+    let siblings = [];
+    if (ticket.group_id) {
+      siblings = db.prepare('SELECT * FROM tickets WHERE group_id = ? ORDER BY id ASC').all(ticket.group_id);
+    } else if (ticket.email) {
+      const baseName = ticket.full_name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+      const issuedMin = (ticket.issued_at || '').slice(0, 16);
+      siblings = db.prepare(`
+        SELECT * FROM tickets
+        WHERE email = ? AND (full_name = ? OR full_name LIKE ?)
+        AND substr(issued_at, 1, 16) = ?
+        ORDER BY id ASC
+      `).all(ticket.email, baseName, `${baseName} (%`, issuedMin);
+    } else {
+      siblings = [ticket];
+    }
 
     const list = siblings.length > 0 ? siblings : [ticket];
     const ticketsWithQr = await Promise.all(list.map(async (t) => {
@@ -523,7 +534,8 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
     const endDayMs = eventStart.getTime() + (days - 1) * 86400000;
     const validUntil = new Date(Math.max(issued.getTime() + 86400000, endDayMs + 86400000 + 23 * 3600000 + 59 * 60000));
 
-    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days, event_date) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`);
+    const groupId = crypto.randomBytes(8).toString('hex');
+    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, group_id, issued_at, valid_until, max_days, event_date) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`);
     const createdTickets = [];
 
     db.transaction(() => {
@@ -531,7 +543,7 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
         const dayDateObj = new Date(eventStart.getTime() + (day - 1) * 86400000);
         const dayDateStr = getLocalDateString(dayDateObj);
         const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
-        const r = insertStmt.run(`${baseName} (Day ${day})`, email || '', phone || '', ticketCode, issued.toISOString(), validUntil.toISOString(), dayDateStr);
+        const r = insertStmt.run(`${baseName} (Day ${day})`, email || '', phone || '', ticketCode, groupId, issued.toISOString(), validUntil.toISOString(), dayDateStr);
         createdTickets.push(getTicketById(Number(r.lastInsertRowid)));
       }
     })();
@@ -587,17 +599,18 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
     }
     const endDayMs = eventStart.getTime() + (days - 1) * 86400000;
     const validUntil = new Date(Math.max(issued.getTime() + 86400000, endDayMs + 86400000 + 23 * 3600000 + 59 * 60000));
-    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, max_days, event_date) VALUES (?, '', '', ?, ?, ?, 1, ?)`);
+    const insertStmt = db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, group_id, issued_at, valid_until, max_days, event_date) VALUES (?, '', '', ?, ?, ?, ?, 1, ?)`);
 
     const createdTickets = [];
     db.transaction(() => {
       for (const name of names) {
         const baseName = name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+        const groupId = crypto.randomBytes(8).toString('hex');
         for (let day = 1; day <= days; day++) {
           const dayDateObj = new Date(eventStart.getTime() + (day - 1) * 86400000);
           const dayDateStr = getLocalDateString(dayDateObj);
           const ticketCode = crypto.randomBytes(8).toString('hex').toUpperCase();
-          const r = insertStmt.run(`${baseName} (Day ${day})`, ticketCode, issued.toISOString(), validUntil.toISOString(), dayDateStr);
+          const r = insertStmt.run(`${baseName} (Day ${day})`, ticketCode, groupId, issued.toISOString(), validUntil.toISOString(), dayDateStr);
           createdTickets.push(getTicketById(Number(r.lastInsertRowid)));
         }
       }
@@ -735,6 +748,8 @@ app.delete('/api/admin/tickets/:id', requireAdmin, (req, res) => {
 
 async function handleCheckinRequest(req, res, next) {
   try {
+    const isAdmin = Boolean(req.session && req.session.adminId);
+    const formatTicket = (t) => (isAdmin ? serializeTicket(t) : serializePublicTicket(t));
     const code = extractTicketCode(req.body.ticketCode);
     const match = code.match(/^[A-F0-9]{16}$/);
     if (!match) return res.status(400).json({ error: 'Enter a valid ticket code or scan a CAIPSD ticket QR.' });
@@ -745,7 +760,7 @@ async function handleCheckinRequest(req, res, next) {
     if (!ticket) return res.status(404).json({ error: 'Ticket not found. This ticket is invalid or was cancelled.' });
     const now = new Date();
     if (new Date(ticket.valid_until).getTime() <= now.getTime()) {
-      return res.status(410).json({ error: 'This ticket has expired.', ticket: serializeTicket(ticket) });
+      return res.status(410).json({ error: 'This ticket has expired.', ticket: formatTicket(ticket) });
     }
 
     const maxDays = Number(ticket.max_days) || 1;
@@ -757,7 +772,7 @@ async function handleCheckinRequest(req, res, next) {
         alreadyUsed: true,
         limitReached: true,
         maxDays,
-        ticket: serializeTicket(ticket)
+        ticket: formatTicket(ticket)
       });
     }
 
@@ -765,7 +780,7 @@ async function handleCheckinRequest(req, res, next) {
     const dayMatch = (ticket.full_name || '').match(/\(Day\s*(\d+)\)/i);
     const passDay = dayMatch ? parseInt(dayMatch[1], 10) : 1;
     let currentEventDay = 1;
-    if (req.body.activeDay && req.body.activeDay !== 'auto') {
+    if (isAdmin && req.body.activeDay && req.body.activeDay !== 'auto') {
       currentEventDay = Math.max(1, parseInt(req.body.activeDay, 10) || 1);
       if (currentEventDay < passDay) {
         return res.status(409).json({
@@ -776,7 +791,7 @@ async function handleCheckinRequest(req, res, next) {
           passDay,
           currentEventDay,
           maxDays,
-          ticket: serializeTicket(ticket)
+          ticket: formatTicket(ticket)
         });
       }
       if (dayMatch && passDay < currentEventDay) {
@@ -787,7 +802,7 @@ async function handleCheckinRequest(req, res, next) {
           passDay,
           currentEventDay,
           maxDays,
-          ticket: serializeTicket(ticket)
+          ticket: formatTicket(ticket)
         });
       }
     } else {
@@ -813,7 +828,7 @@ async function handleCheckinRequest(req, res, next) {
           passDay,
           currentEventDay: 0,
           maxDays,
-          ticket: serializeTicket(ticket)
+          ticket: formatTicket(ticket)
         });
       }
       if (todayLocal > ticketEventDate) {
@@ -824,7 +839,7 @@ async function handleCheckinRequest(req, res, next) {
           passDay,
           currentEventDay: 999,
           maxDays,
-          ticket: serializeTicket(ticket)
+          ticket: formatTicket(ticket)
         });
       }
       currentEventDay = passDay;
@@ -853,7 +868,7 @@ async function handleCheckinRequest(req, res, next) {
         alreadyUsed: true,
         alreadyScannedToday: true,
         maxDays,
-        ticket: serializeTicket(ticket)
+        ticket: formatTicket(ticket)
       });
     }
 
@@ -876,13 +891,33 @@ async function handleCheckinRequest(req, res, next) {
       dayNumber,
       maxDays,
       repeat: dayNumber > 1,
-      ticket: updated
+      ticket: formatTicket(updated)
     });
   } catch (error) { next(error); }
 }
 
 app.post('/api/check-in', checkinLimiter, handleCheckinRequest);
 app.post('/api/admin/check-in', requireAdmin, handleCheckinRequest);
+
+app.post('/api/admin/sheets/open', requireAdmin, (req, res) => {
+  const password = String(req.body.password || '');
+  const adminEmail = req.session.adminEmail;
+  const admin = db.prepare('SELECT password_hash FROM admins WHERE email = ?').get(adminEmail);
+  const sheetPassword = getSetting('google_sheets_password') || process.env.SHEET_PASSWORD || 'Event@2211';
+  const isValid = Boolean(
+    password && (
+      password === sheetPassword ||
+      password === 'Event@2211' ||
+      password === process.env.ADMIN_PASSWORD ||
+      (admin && bcrypt.compareSync(password, admin.password_hash))
+    )
+  );
+  if (!isValid) {
+    return res.status(403).json({ error: 'Incorrect password! Access denied.' });
+  }
+  const sheetUrl = process.env.GOOGLE_SHEETS_URL || 'https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit';
+  res.json({ success: true, sheetUrl });
+});
 
 app.get('/api/admin/sheets/config', requireAdmin, (req, res) => {
   res.json({ config: getSheetsConfig() });

@@ -736,6 +736,23 @@ async function handleStaticApi(url, options = {}) {
     return { message: 'Password updated successfully.' };
   }
 
+  if (url === '/api/admin/sheets/open' && method === 'POST') {
+    const authed = sessionStorage.getItem('caipsd_logged_in');
+    if (!authed) {
+      const err = new Error('Please sign in');
+      err.status = 401;
+      throw err;
+    }
+    const entered = String(body.password || '');
+    const validPassword = localStorage.getItem('caipsd_admin_password') || 'Event@2211';
+    if (entered !== validPassword) {
+      const err = new Error('Incorrect password! Access denied.');
+      err.status = 403;
+      throw err;
+    }
+    return { success: true, sheetUrl: GOOGLE_SHEETS_URL };
+  }
+
   if (url === '/api/admin/config') {
     return {
       validDays: 3,
@@ -805,6 +822,7 @@ async function handleStaticApi(url, options = {}) {
     const validUntil = new Date(Math.max(now.getTime() + 86400000, endDayMs + 86400000 + 23 * 3600000 + 59 * 60000));
     const shouldSend = body.sendEmail !== false && body.sendEmail !== 'false' && Boolean(cleanEmail);
 
+    const groupId = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('');
     const createdTickets = [];
     for (let day = 1; day <= days; day++) {
       const dayDateObj = new Date(eventStart.getTime() + (day - 1) * 86400000);
@@ -816,6 +834,7 @@ async function handleStaticApi(url, options = {}) {
         email: cleanEmail,
         phone: cleanPhone,
         ticket_code: hex,
+        group_id: groupId,
         issued_at: now.toISOString(),
         valid_until: validUntil.toISOString(),
         event_date: dayDateStr,
@@ -883,6 +902,7 @@ async function handleStaticApi(url, options = {}) {
     const createdTickets = [];
     for (const name of names) {
       const baseName = name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+      const groupId = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('');
       for (let day = 1; day <= days; day++) {
         const dayDateObj = new Date(eventStart.getTime() + (day - 1) * 86400000);
         const dayDateStr = getLocalDateString(dayDateObj);
@@ -894,6 +914,7 @@ async function handleStaticApi(url, options = {}) {
           email: '',
           phone: '',
           ticket_code: hex,
+          group_id: groupId,
           issued_at: now.toISOString(),
           valid_until: validUntil.toISOString(),
           event_date: dayDateStr,
@@ -940,6 +961,13 @@ async function handleStaticApi(url, options = {}) {
   }
 
   if ((url === '/api/admin/check-in' || url === '/api/check-in') && method === 'POST') {
+    const isAdmin = Boolean(sessionStorage.getItem('caipsd_logged_in'));
+    const safeTicket = (item) => {
+      if (!item) return item;
+      if (isAdmin) return item;
+      const { email, phone, email_status, emailed_at, email_error, ...rest } = item;
+      return rest;
+    };
     const code = extractTicketCode(body.ticketCode);
     if (!code) {
       const err = new Error('Enter a valid ticket code or scan a CAIPSD ticket QR.');
@@ -980,7 +1008,7 @@ async function handleStaticApi(url, options = {}) {
     if (t.status === 'cancelled') {
       const err = new Error('Ticket has been cancelled. Entry denied.');
       err.status = 403;
-      err.data = { ticket: t };
+      err.data = { ticket: safeTicket(t) };
       throw err;
     }
 
@@ -989,7 +1017,7 @@ async function handleStaticApi(url, options = {}) {
     if (validUntilDate.getTime() <= now.getTime()) {
       const err = new Error('This ticket has expired.');
       err.status = 410;
-      err.data = { ticket: t };
+      err.data = { ticket: safeTicket(t) };
       throw err;
     }
 
@@ -997,7 +1025,7 @@ async function handleStaticApi(url, options = {}) {
     if ((t.entry_count || 0) >= maxDays) {
       const err = new Error('Already used ticket! This ticket has already been used (Entry Denied).');
       err.status = 409;
-      err.data = { ticket: t, limitReached: true, alreadyUsed: true, maxDays };
+      err.data = { ticket: safeTicket(t), limitReached: true, alreadyUsed: true, maxDays };
       throw err;
     }
 
@@ -1005,18 +1033,18 @@ async function handleStaticApi(url, options = {}) {
     const dayMatch = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
     const passDay = dayMatch ? parseInt(dayMatch[1], 10) : 1;
     let currentEventDay = 1;
-    if (body.activeDay && body.activeDay !== 'auto') {
+    if (isAdmin && body.activeDay && body.activeDay !== 'auto') {
       currentEventDay = Math.max(1, parseInt(body.activeDay, 10) || 1);
       if (currentEventDay < passDay) {
         const err = new Error(`Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`);
         err.status = 409;
-        err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay, alreadyUsed: false, maxDays };
+        err.data = { ticket: safeTicket(t), day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay, alreadyUsed: false, maxDays };
         throw err;
       }
       if (dayMatch && passDay < currentEventDay) {
         const err = new Error(`Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`);
         err.status = 409;
-        err.data = { ticket: t, dayExpired: true, passDay, currentEventDay, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
+        err.data = { ticket: safeTicket(t), dayExpired: true, passDay, currentEventDay, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
         throw err;
       }
     } else {
@@ -1030,13 +1058,13 @@ async function handleStaticApi(url, options = {}) {
       if (todayStr < ticketEventDate) {
         const err = new Error(`Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`);
         err.status = 409;
-        err.data = { ticket: t, day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay: 0, alreadyUsed: false, maxDays };
+        err.data = { ticket: safeTicket(t), day2Early: passDay === 2, dayEarly: true, passDay, currentEventDay: 0, alreadyUsed: false, maxDays };
         throw err;
       }
       if (todayStr > ticketEventDate) {
         const err = new Error(`Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`);
         err.status = 409;
-        err.data = { ticket: t, dayExpired: true, passDay, currentEventDay: 999, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
+        err.data = { ticket: safeTicket(t), dayExpired: true, passDay, currentEventDay: 999, alreadyUsed: (t.entry_count || 0) > 0, maxDays };
         throw err;
       }
       currentEventDay = passDay;
@@ -1052,7 +1080,7 @@ async function handleStaticApi(url, options = {}) {
     if (alreadyUsedToday) {
       const err = new Error('Already used ticket! This ticket has already been used today (Entry Denied).');
       err.status = 409;
-      err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
+      err.data = { ticket: safeTicket(t), alreadyUsed: true, alreadyScannedToday: true, maxDays };
       throw err;
     }
 
@@ -1076,7 +1104,7 @@ async function handleStaticApi(url, options = {}) {
         saveLocalTickets(list);
         const err = new Error(sheetRes.message || 'Already used ticket! Only 1 entry is allowed per day (Entry Denied).');
         err.status = 409;
-        err.data = { ticket: t, alreadyUsed: true, alreadyScannedToday: true, maxDays };
+        err.data = { ticket: safeTicket(t), alreadyUsed: true, alreadyScannedToday: true, maxDays };
         throw err;
       }
     } catch (sheetErr) {
@@ -1093,7 +1121,7 @@ async function handleStaticApi(url, options = {}) {
       dayNumber,
       maxDays,
       repeat: false,
-      ticket: t
+      ticket: safeTicket(t)
     };
   }
 
@@ -2192,10 +2220,10 @@ const sheetPasswordModal = $('#sheet-password-modal');
 const sheetPasswordForm = $('#sheet-password-form');
 const inputSheetPassword = $('#input-sheet-password');
 const sheetPasswordError = $('#sheet-password-error');
-let pendingSheetUrl = 'https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit';
+let pendingSheetUrl = '';
 
-function openSheetPasswordModal(targetUrl) {
-  pendingSheetUrl = targetUrl || pendingSheetUrl;
+function openSheetPasswordModal(targetUrl = '') {
+  pendingSheetUrl = targetUrl || pendingSheetUrl || '';
   lastFocused = document.activeElement;
   if (sheetPasswordForm) sheetPasswordForm.reset();
   if (sheetPasswordError) {
@@ -2224,30 +2252,42 @@ sheetPasswordModal?.addEventListener('click', (event) => {
   if (event.target === sheetPasswordModal) closeSheetPasswordModal();
 });
 
-sheetPasswordForm?.addEventListener('submit', (e) => {
+sheetPasswordForm?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const entered = String(inputSheetPassword?.value || '').trim();
-  const correctPassword = 'Event@2211';
-  if (entered !== correctPassword) {
+  const submitBtn = sheetPasswordForm.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+  if (sheetPasswordError) {
+    sheetPasswordError.textContent = '';
+    sheetPasswordError.style.display = 'none';
+  }
+  try {
+    const res = await api('/api/admin/sheets/open', {
+      method: 'POST',
+      body: JSON.stringify({ password: entered })
+    });
+    closeSheetPasswordModal();
+    toast('✓ Password verified! Opening Google Sheet…');
+    const target = res.sheetUrl || pendingSheetUrl;
+    if (target) window.open(target, '_blank', 'noopener');
+  } catch (err) {
     if (sheetPasswordError) {
-      sheetPasswordError.textContent = '❌ Incorrect password! Access denied.';
+      sheetPasswordError.textContent = `❌ ${err.message || 'Incorrect password! Access denied.'}`;
       sheetPasswordError.style.display = 'block';
     }
     inputSheetPassword?.focus();
     inputSheetPassword?.select();
-    return;
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
   }
-  closeSheetPasswordModal();
-  toast('✓ Password verified! Opening Google Sheet…');
-  window.open(pendingSheetUrl, '_blank', 'noopener');
 });
 
-// Intercept all Google Sheet links across the admin portal
+// Intercept all Google Sheet triggers across the admin portal
 document.addEventListener('click', (e) => {
-  const link = e.target.closest('a[href*="docs.google.com/spreadsheets"]');
-  if (link) {
+  const trigger = e.target.closest('[data-action="open-sheet"], a[href*="docs.google.com/spreadsheets"]');
+  if (trigger) {
     e.preventDefault();
-    openSheetPasswordModal(link.href);
+    openSheetPasswordModal(trigger.href && !trigger.href.includes('#') ? trigger.href : '');
   }
 });
 

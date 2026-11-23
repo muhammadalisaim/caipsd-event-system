@@ -573,6 +573,143 @@ test('tickets pagination: supports page and limit parameters, returns total and 
   assert.equal(p3.data.page, 3);
 });
 
+test('security: public check-in ignores forged activeDay parameter while admin check-in respects it', async () => {
+  const issueRes = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Security Tester', days: 3, sendEmail: false }
+  });
+  assert.equal(issueRes.status, 201);
+  const day3Ticket = issueRes.data.tickets[2];
+
+  // Public caller attempts to forge activeDay: 3 to check in a Day 3 ticket on Day 1:
+  const forgedCheckin = await call('/api/check-in', {
+    method: 'POST',
+    auth: false,
+    body: { ticketCode: day3Ticket.ticket_code, activeDay: 3 }
+  });
+  // Must be rejected because public callers cannot override calendar day!
+  assert.equal(forgedCheckin.status, 409);
+  assert.match(forgedCheckin.data.error, /Day 3 Ticket/i);
+
+  // Authenticated admin gate scanner with manual gate activeDay: 3 override is permitted:
+  const adminCheckin = await call('/api/admin/check-in', {
+    method: 'POST',
+    auth: true,
+    body: { ticketCode: day3Ticket.ticket_code, activeDay: 3 }
+  });
+  assert.equal(adminCheckin.status, 200);
+});
+
+test('security: public check-in does not leak attendee personal email or phone', async () => {
+  const issueRes = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: {
+      fullName: 'Privacy Subject',
+      email: 'sensitive-privacy@caipsd.org',
+      phone: '+92 300 7777777',
+      sendEmail: false
+    }
+  });
+  assert.equal(issueRes.status, 201);
+  const ticket = issueRes.data.tickets[0];
+
+  // 1. Success check-in response
+  const pubSuccess = await call('/api/check-in', {
+    method: 'POST',
+    auth: false,
+    body: { ticketCode: ticket.ticket_code }
+  });
+  assert.equal(pubSuccess.status, 200);
+  assert.equal(pubSuccess.data.ticket.email, undefined, 'Public response must not leak email');
+  assert.equal(pubSuccess.data.ticket.phone, undefined, 'Public response must not leak phone');
+
+  // 2. Error / repeated check-in response (409)
+  const pubRepeat = await call('/api/check-in', {
+    method: 'POST',
+    auth: false,
+    body: { ticketCode: ticket.ticket_code }
+  });
+  assert.equal(pubRepeat.status, 409);
+  assert.equal(pubRepeat.data.ticket.email, undefined, 'Error response must not leak email');
+  assert.equal(pubRepeat.data.ticket.phone, undefined, 'Error response must not leak phone');
+});
+
+test('security: participants with identical names issued in same minute do not cross-leak ticket codes', async () => {
+  // Participant A: "Muhammad Ali"
+  const resA = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Muhammad Ali', email: 'ali-first@example.com', days: 2, sendEmail: false }
+  });
+  assert.equal(resA.status, 201);
+  const codeA1 = resA.data.tickets[0].ticket_code;
+  const codeA2 = resA.data.tickets[1].ticket_code;
+
+  // Participant B: also "Muhammad Ali", issued in the exact same minute
+  const resB = await call('/api/admin/tickets', {
+    method: 'POST',
+    body: { fullName: 'Muhammad Ali', email: 'ali-second@example.com', days: 2, sendEmail: false }
+  });
+  assert.equal(resB.status, 201);
+  const codeB1 = resB.data.tickets[0].ticket_code;
+  const codeB2 = resB.data.tickets[1].ticket_code;
+
+  // Verify group_ids are distinct
+  assert.notEqual(resA.data.tickets[0].group_id, resB.data.tickets[0].group_id);
+
+  // Fetch ticket view for Participant A's ticket
+  const viewA = await call(`/api/ticket/${codeA1}`, { auth: false });
+  assert.equal(viewA.status, 200);
+  const returnedCodesA = viewA.data.tickets.map((t) => t.ticket_code);
+  assert.ok(returnedCodesA.includes(codeA1));
+  assert.ok(returnedCodesA.includes(codeA2));
+  assert.ok(!returnedCodesA.includes(codeB1), 'Participant A must NOT see Participant B code 1');
+  assert.ok(!returnedCodesA.includes(codeB2), 'Participant A must NOT see Participant B code 2');
+
+  // Fetch ticket view for Participant B's ticket
+  const viewB = await call(`/api/ticket/${codeB1}`, { auth: false });
+  assert.equal(viewB.status, 200);
+  const returnedCodesB = viewB.data.tickets.map((t) => t.ticket_code);
+  assert.ok(returnedCodesB.includes(codeB1));
+  assert.ok(returnedCodesB.includes(codeB2));
+  assert.ok(!returnedCodesB.includes(codeA1), 'Participant B must NOT see Participant A code 1');
+  assert.ok(!returnedCodesB.includes(codeA2), 'Participant B must NOT see Participant A code 2');
+});
+
+test('security: Google Sheet access endpoint enforces admin auth and password verification', async () => {
+  // 1. Unauthenticated request rejected
+  const unauth = await call('/api/admin/sheets/open', { method: 'POST', auth: false, body: { password: 'Event@2211' } });
+  assert.equal(unauth.status, 401);
+
+  // 2. Authenticated but wrong password rejected
+  const wrongPass = await call('/api/admin/sheets/open', { method: 'POST', auth: true, body: { password: 'WrongPassword999!' } });
+  assert.equal(wrongPass.status, 403);
+  assert.match(wrongPass.data.error, /Incorrect password/i);
+
+  // 3. Authenticated with correct password succeeds and returns sheetUrl
+  const success = await call('/api/admin/sheets/open', { method: 'POST', auth: true, body: { password: 'Event@2211' } });
+  assert.equal(success.status, 200);
+  assert.equal(success.data.success, true);
+  assert.ok(success.data.sheetUrl && success.data.sheetUrl.includes('docs.google.com/spreadsheets'));
+});
+
+test('security: encryption key throws in production if SESSION_SECRET is missing or short', async () => {
+  const { encryptSecret } = require('../db');
+  const prevEnv = process.env.NODE_ENV;
+  const prevSecret = process.env.SESSION_SECRET;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.SESSION_SECRET;
+    assert.throws(() => {
+      encryptSecret('test-secret-value');
+    }, /SESSION_SECRET must be set and at least 32 characters/);
+  } finally {
+    process.env.NODE_ENV = prevEnv;
+    process.env.SESSION_SECRET = prevSecret;
+  }
+});
+
+
 
 
 

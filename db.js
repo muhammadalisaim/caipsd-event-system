@@ -39,6 +39,7 @@ db.exec(`
     email TEXT DEFAULT '',
     phone TEXT DEFAULT '',
     ticket_code TEXT NOT NULL UNIQUE,
+    group_id TEXT,
     issued_at TEXT NOT NULL,
     valid_until TEXT NOT NULL,
     entry_count INTEGER NOT NULL DEFAULT 0,
@@ -90,6 +91,14 @@ try {
   db.exec("ALTER TABLE tickets ADD COLUMN event_date TEXT");
 } catch {}
 
+// Migration: add group_id column if missing
+try {
+  db.exec("ALTER TABLE tickets ADD COLUMN group_id TEXT");
+} catch {}
+try {
+  db.exec("CREATE INDEX IF NOT EXISTS idx_tickets_group ON tickets(group_id)");
+} catch {}
+
 // Migration: remove unique constraint on email if present in existing table
 try {
   const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tickets'").get();
@@ -139,8 +148,19 @@ function initializeAdmin(email, password) {
   }
 }
 
+let ephemeralDevSecret = null;
 function getEncryptionKey() {
-  const secret = process.env.SESSION_SECRET || 'caipsd_default_encryption_secret_key_32b';
+  const secret = process.env.SESSION_SECRET;
+  if (!secret || secret.length < 32) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('SESSION_SECRET must be set and at least 32 characters long for encryption.');
+    }
+    if (!ephemeralDevSecret) {
+      ephemeralDevSecret = crypto.randomBytes(32).toString('hex');
+      console.warn('WARNING: SESSION_SECRET is missing or under 32 characters. Generated ephemeral random key for encryption in development/test mode.');
+    }
+    return crypto.createHash('sha256').update(ephemeralDevSecret).digest();
+  }
   return crypto.createHash('sha256').update(secret).digest();
 }
 

@@ -289,7 +289,7 @@
         <button class="nav-item" id="sidebar-duration-btn"><span class="nav-icon">⚙</span>Event Duration</button>
       </nav>
       <div class="sidebar-bottom">
-        <a href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener" class="sidebar-sheet-link" title="Open Google Sheet Database">
+        <a href="#open-sheet" data-action="open-sheet" class="sidebar-sheet-link" title="Open Google Sheet Database">
           <span>📊</span> Live Google Sheet ↗
         </a>
         <button id="logout-button" class="logout-button"><span>↪</span> Sign out</button>
@@ -307,7 +307,7 @@
           <button id="topbar-duration-btn" class="topbar-btn topbar-btn-duration" title="Change Event Duration (2, 3, 4 days)">
             <i></i> <span>Duration: <strong id="topbar-days-label">2 Days</strong> ⚙</span>
           </button>
-          <a href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener" class="topbar-btn topbar-btn-sheet" title="Open permanent Google Sheet">
+          <a href="#open-sheet" data-action="open-sheet" class="topbar-btn topbar-btn-sheet" title="Open permanent Google Sheet">
             <i></i> <span>Live Sheet ↗</span>
           </a>
           <div class="admin-chip">
@@ -359,7 +359,7 @@
               <div class="panel-heading"><div><h2>Event Controls</h2><p>Operational shortcuts</p></div></div>
               <button class="quick-action" id="quick-sheet-sync"><span class="quick-icon quick-icon-purple">🔄</span><span><strong>Sync to Google Sheet</strong><small>Push all tickets immediately to sheet</small></span><b>→</b></button>
               <button class="quick-action" id="quick-duration-action"><span class="quick-icon quick-icon-blue">⚙</span><span><strong>Event Duration (Days)</strong><small>Set ticket validity duration (2, 3, 4 days)</small></span><b>→</b></button>
-              <a class="quick-action" href="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" target="_blank" rel="noopener"><span class="quick-icon quick-icon-blue">📊</span><span><strong>Google Sheet Database ↗</strong><small>Live auto-sync records</small></span><b>↗</b></a>
+              <a class="quick-action" href="#open-sheet" data-action="open-sheet"><span class="quick-icon quick-icon-blue">📊</span><span><strong>Google Sheet Database ↗</strong><small>Live auto-sync records</small></span><b>↗</b></a>
               <button class="quick-action" id="quick-export"><span class="quick-icon quick-icon-purple">⇩</span><span><strong>Export All Tickets (CSV)</strong><small>Download attendance spreadsheet report</small></span><b>→</b></button>
             </section>
             <section class="panel workshop-overview-panel">
