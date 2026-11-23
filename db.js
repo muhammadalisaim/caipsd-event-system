@@ -127,11 +127,15 @@ try {
 function initializeAdmin(email, password) {
   const normalizedEmail = String(email || '').trim().toLowerCase();
   if (!normalizedEmail || !password) throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD are required.');
-  const existing = db.prepare('SELECT id FROM admins WHERE email = ?').get(normalizedEmail);
+  const existing = db.prepare('SELECT id, email, password_hash FROM admins WHERE email = ?').get(normalizedEmail);
   if (!existing) {
     const hash = bcrypt.hashSync(password, 12);
     db.prepare('INSERT INTO admins (email, password_hash) VALUES (?, ?)').run(normalizedEmail, hash);
     console.log(`Admin account created for ${normalizedEmail}`);
+  } else if (!bcrypt.compareSync(password, existing.password_hash)) {
+    const hash = bcrypt.hashSync(password, 12);
+    db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(hash, existing.id);
+    console.log(`Admin password updated for ${normalizedEmail}`);
   }
 }
 

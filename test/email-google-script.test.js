@@ -142,8 +142,9 @@ test('gate check-in verifies tickets in SQLite and rejects sheet-only unverified
   assert.equal(sheetOnly.status, 404);
 
   const db = require('../db').db;
+  const todayDate = new Date().toISOString().slice(0, 10);
   db.prepare(`INSERT INTO tickets (full_name, email, phone, ticket_code, issued_at, valid_until, entry_count, max_days, event_date) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)`).run(
-    'Legit Participant', 'legit@example.com', '123', 'CCCCCCCCCCCCCCCC', new Date().toISOString(), future, '2026-11-18'
+    'Legit Participant', 'legit@example.com', '123', 'CCCCCCCCCCCCCCCC', new Date().toISOString(), future, todayDate
   );
   const fine = await call('/api/check-in', { method: 'POST', auth: false, body: { ticketCode: 'CCCCCCCCCCCCCCCC' } });
   assert.equal(fine.status, 200);

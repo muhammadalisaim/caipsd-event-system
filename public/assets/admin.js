@@ -689,14 +689,51 @@ async function handleStaticApi(url, options = {}) {
   }
 
   if (url === '/api/admin/login') {
+    const email = String(body.email || '').trim().toLowerCase();
+    const password = String(body.password || '');
+    const validEmail = 'admin@caipsd.org';
+    const validPassword = localStorage.getItem('caipsd_admin_password') || 'Event@2211';
+
+    if (email !== validEmail || password !== validPassword) {
+      const err = new Error('Email or password is incorrect.');
+      err.status = 401;
+      throw err;
+    }
+
     sessionStorage.setItem('caipsd_logged_in', '1');
-    sessionStorage.setItem('caipsd_admin_email', body.email || 'admin@caipsd.org');
-    return { admin: { email: body.email || 'admin@caipsd.org' } };
+    sessionStorage.setItem('caipsd_admin_email', validEmail);
+    return { admin: { email: validEmail } };
   }
 
   if (url === '/api/admin/logout') {
     sessionStorage.removeItem('caipsd_logged_in');
+    sessionStorage.removeItem('caipsd_admin_email');
     return { message: 'Signed out.' };
+  }
+
+  if (url === '/api/admin/change-password' && method === 'POST') {
+    const currentPassword = String(body.currentPassword ?? '');
+    const newPassword = String(body.newPassword ?? '');
+    const validPassword = localStorage.getItem('caipsd_admin_password') || 'Event@2211';
+
+    if (!currentPassword || !newPassword) {
+      const err = new Error('Please provide both current and new password.');
+      err.status = 400;
+      throw err;
+    }
+    if (newPassword.length < 8) {
+      const err = new Error('New password must be at least 8 characters long.');
+      err.status = 400;
+      throw err;
+    }
+    if (currentPassword !== validPassword) {
+      const err = new Error('Current password is incorrect.');
+      err.status = 401;
+      throw err;
+    }
+
+    localStorage.setItem('caipsd_admin_password', newPassword);
+    return { message: 'Password updated successfully.' };
   }
 
   if (url === '/api/admin/config') {
