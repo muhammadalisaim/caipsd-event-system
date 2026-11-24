@@ -37,6 +37,7 @@ const isStaticHost = Boolean(
   window.location.hostname.endsWith('github.io')
 );
 
+const GOOGLE_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit';
 const GOOGLE_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzodcplXRQvdPQlWLPeQbGOZdomvehyFGo4wG5K_9ugWSGuFKN-sRy6hfA6cq5AV-ds2Q/exec';
 const GOOGLE_WEBHOOK_SECRET = 'Event@2211';
 
@@ -750,7 +751,8 @@ async function handleStaticApi(url, options = {}) {
       err.status = 403;
       throw err;
     }
-    return { success: true, sheetUrl: GOOGLE_SHEETS_URL };
+    const targetUrl = localStorage.getItem('caipsd_sheets_url') || GOOGLE_SHEETS_URL;
+    return { success: true, sheetUrl: targetUrl };
   }
 
   if (url === '/api/admin/config') {
@@ -2268,7 +2270,7 @@ sheetPasswordForm?.addEventListener('submit', async (e) => {
     });
     closeSheetPasswordModal();
     toast('✓ Password verified! Opening Google Sheet…');
-    const target = res.sheetUrl || pendingSheetUrl;
+    const target = res?.sheetUrl || pendingSheetUrl || GOOGLE_SHEETS_URL;
     if (target) window.open(target, '_blank', 'noopener');
   } catch (err) {
     if (sheetPasswordError) {

@@ -915,7 +915,8 @@ app.post('/api/admin/sheets/open', requireAdmin, (req, res) => {
   if (!isValid) {
     return res.status(403).json({ error: 'Incorrect password! Access denied.' });
   }
-  const sheetUrl = process.env.GOOGLE_SHEETS_URL || 'https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit';
+  const config = getSheetsConfig();
+  const sheetUrl = process.env.GOOGLE_SHEETS_URL || getSetting('google_sheets_sheet_url') || config.spreadsheetUrl || 'https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit';
   res.json({ success: true, sheetUrl });
 });
 
