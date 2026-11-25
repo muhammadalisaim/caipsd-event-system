@@ -14,6 +14,7 @@ function extractTicketCode(raw) {
 
 const params = new URLSearchParams(window.location.search);
 const code = extractTicketCode(params.get('code') || window.location.search.replace(/^\?/, ''));
+const urlCodes = (params.get('codes') || '').split(',').map(extractTicketCode).filter(Boolean);
 const state = document.getElementById('ticket-state');
 const container = document.getElementById('tickets-container');
 const actions = document.getElementById('ticket-actions');
@@ -124,7 +125,8 @@ async function loadTicket() {
 
     // 1. Try server API
     try {
-      const response = await fetch(`/api/ticket/${encodeURIComponent(code)}`);
+      const codesQuery = urlCodes.length > 0 ? `?codes=${encodeURIComponent(urlCodes.join(','))}` : '';
+      const response = await fetch(`/api/ticket/${encodeURIComponent(code)}${codesQuery}`);
       if (response.ok) {
         const data = await response.json();
         if (data.tickets && Array.isArray(data.tickets) && data.tickets.length > 0) {
@@ -144,7 +146,8 @@ async function loadTicket() {
         let siblings = [];
         if (found.group_id) {
           siblings = list.filter((x) => x.group_id && x.group_id === found.group_id);
-        } else if (found.email) {
+        }
+        if ((!siblings || siblings.length <= 1) && found.email) {
           const baseName = String(found.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
           const issuedMin = (found.issued_at || '').slice(0, 16);
           siblings = list.filter((x) => {
@@ -152,9 +155,25 @@ async function loadTicket() {
             const xMin = (x.issued_at || '').slice(0, 16);
             return x.email === found.email && xBase === baseName && (!issuedMin || !xMin || xMin === issuedMin);
           });
-        } else {
-          siblings = [found];
         }
+        if (!siblings || siblings.length <= 1) {
+          const baseName = String(found.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+          const issuedDate = (found.issued_at || '').slice(0, 10);
+          siblings = list.filter((x) => {
+            const xBase = String(x.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+            const xDate = (x.issued_at || '').slice(0, 10);
+            return xBase === baseName && (!issuedDate || !xDate || xDate === issuedDate);
+          });
+        }
+        if (urlCodes.length > 0) {
+          for (const ec of urlCodes) {
+            const extra = list.find((x) => x.ticket_code && x.ticket_code.toUpperCase() === ec);
+            if (extra && !siblings.some((s) => (s.ticket_code || '').toUpperCase() === ec)) {
+              siblings.push(extra);
+            }
+          }
+        }
+        if (!siblings || siblings.length === 0) siblings = [found];
         const dayMap = new Map();
         for (const sib of siblings) {
           const m = (sib.full_name || '').match(/\(Day\s*(\d+)\)/i);

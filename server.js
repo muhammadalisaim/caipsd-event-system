@@ -342,7 +342,8 @@ app.get('/api/ticket/:code', ticketLimiter, async (req, res) => {
     let siblings = [];
     if (ticket.group_id) {
       siblings = db.prepare('SELECT * FROM tickets WHERE group_id = ? ORDER BY id ASC').all(ticket.group_id);
-    } else if (ticket.email) {
+    }
+    if ((!siblings || siblings.length <= 1) && ticket.email) {
       const baseName = ticket.full_name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
       const issuedMin = (ticket.issued_at || '').slice(0, 16);
       siblings = db.prepare(`
@@ -351,11 +352,45 @@ app.get('/api/ticket/:code', ticketLimiter, async (req, res) => {
         AND substr(issued_at, 1, 16) = ?
         ORDER BY id ASC
       `).all(ticket.email, baseName, `${baseName} (%`, issuedMin);
-    } else {
-      siblings = [ticket];
+    }
+    if (!siblings || siblings.length <= 1) {
+      const baseName = ticket.full_name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
+      const issuedDate = (ticket.issued_at || '').slice(0, 10);
+      siblings = db.prepare(`
+        SELECT * FROM tickets
+        WHERE (full_name = ? OR full_name LIKE ?)
+        AND substr(issued_at, 1, 10) = ?
+        ORDER BY id ASC
+      `).all(baseName, `${baseName} (%`, issuedDate);
+    }
+    const extraCodesParam = String(req.query.codes || '').split(',').map((c) => cleanText(c, 32).toUpperCase()).filter((c) => /^[A-F0-9]{16}$/.test(c));
+    if (extraCodesParam.length > 0) {
+      for (const ec of extraCodesParam) {
+        if (!siblings.some((s) => s.ticket_code === ec)) {
+          const extraTicket = getTicketByCode(ec);
+          if (extraTicket) siblings.push(extraTicket);
+        }
+      }
+    }
+    if (!siblings || siblings.length === 0) siblings = [ticket];
+    siblings.sort((a, b) => {
+      const ma = (a.full_name || '').match(/\(Day\s*(\d+)\)/i);
+      const mb = (b.full_name || '').match(/\(Day\s*(\d+)\)/i);
+      const da = ma ? parseInt(ma[1], 10) : 0;
+      const dbDay = mb ? parseInt(mb[1], 10) : 0;
+      if (da !== dbDay) return da - dbDay;
+      return (a.id || 0) - (b.id || 0);
+    });
+
+    if (siblings.length > 1) {
+      const validGid = ticket.group_id || siblings.find((s) => s.group_id)?.group_id || crypto.randomBytes(8).toString('hex');
+      try {
+        const ids = siblings.map((s) => s.id);
+        db.prepare('UPDATE tickets SET group_id = ? WHERE id IN (' + ids.map(() => '?').join(',') + ')').run(validGid, ...ids);
+      } catch {}
     }
 
-    const list = siblings.length > 0 ? siblings : [ticket];
+    const list = siblings;
     const ticketsWithQr = await Promise.all(list.map(async (t) => {
       const qr = t.ticket_code === code ? qrDataUrl : await QRCode.toDataURL(t.ticket_code, qrOptions(240));
       return { ...publicTicket(t), qrDataUrl: qr };

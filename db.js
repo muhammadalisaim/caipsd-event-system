@@ -99,6 +99,31 @@ try {
   db.exec("CREATE INDEX IF NOT EXISTS idx_tickets_group ON tickets(group_id)");
 } catch {}
 
+// Backfill group_id for existing tickets where group_id is NULL
+try {
+  const unassigned = db.prepare("SELECT id, full_name, email, issued_at FROM tickets WHERE group_id IS NULL OR group_id = '' ORDER BY id ASC").all();
+  if (unassigned && unassigned.length > 0) {
+    const groups = new Map();
+    for (const t of unassigned) {
+      const baseName = (t.full_name || '').replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim().toLowerCase();
+      const dateKey = (t.issued_at || '').slice(0, 10);
+      const key = `${baseName}::${t.email || ''}::${dateKey}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(t.id);
+    }
+    const updateStmt = db.prepare("UPDATE tickets SET group_id = ? WHERE id = ?");
+    db.transaction(() => {
+      for (const ids of groups.values()) {
+        const gid = crypto.randomBytes(8).toString('hex');
+        for (const id of ids) {
+          updateStmt.run(gid, id);
+        }
+      }
+    })();
+  }
+} catch (eGid) { console.warn('group_id backfill notice:', eGid.message); }
+
+
 // Migration: remove unique constraint on email if present in existing table
 try {
   const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tickets'").get();

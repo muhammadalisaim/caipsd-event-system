@@ -569,10 +569,12 @@ async function syncTicketsFromGoogleSheet() {
             }
             const passDate = new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
             const eventDateStr = getLocalDateString(passDate);
+            const gid = 'sheet_grp_' + i + '_' + (baseName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'p');
             return {
               id: Date.now() + i * 100 + dIdx,
               ticket_code: code,
               full_name: `${baseName} (Day ${dayNum})`,
+              group_id: gid,
               email,
               phone,
               issued_at: issued,
@@ -1671,7 +1673,7 @@ function ticketsTable(rows, withActions, groupStorage = null) {
     const dateCellHtml = eventDateStr
       ? `<strong>${escapeHtml(formatEventDateShort(eventDateStr, g.tickets.length))}</strong><small style="display:block;color:var(--text-muted, #777);font-size:11px;">Expires: ${escapeHtml(dateTimeLabel(g.validUntil))}</small>`
       : `<span>${escapeHtml(dateTimeLabel(g.validUntil))}</span>`;
-    const actionsHtml = withActions ? `<td><div class="row-actions"><a class="status-action open-ticket-page" href="ticket.html?code=${encodeURIComponent(firstCode)}&_t=${Date.now()}" target="_blank" rel="noopener">View / Print</a><button type="button" class="status-action danger cancel-group" data-index="${idx}" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
+    const actionsHtml = withActions ? `<td><div class="row-actions"><a class="status-action open-ticket-page" href="ticket.html?code=${encodeURIComponent(firstCode)}&codes=${encodeURIComponent(g.tickets.map(t => t.ticket_code).join(","))}&_t=${Date.now()}" target="_blank" rel="noopener">View / Print</a><button type="button" class="status-action danger cancel-group" data-index="${idx}" data-key="${escapeHtml(g.key)}" data-name="${escapeHtml(g.baseName)}">Cancel</button></div></td>` : '';
     const checkboxHtml = withActions ? `<td class="checkbox-col" onclick="event.stopPropagation()"><input type="checkbox" class="ticket-row-check" data-index="${idx}" aria-label="Select participant" /></td>` : '';
     return `<tr class="participant-row" data-index="${idx}" data-key="${escapeHtml(g.key)}" style="cursor:pointer;" title="Click to view passes">${checkboxHtml}<td>${participantCell(g)}</td><td>${escapeHtml(g.phone || '—')}</td><td>${codeHtml}</td><td>${dateCellHtml}</td><td>${groupedPill(g)}</td>${actionsHtml}</tr>`;
   }).join('');
@@ -1803,7 +1805,7 @@ function bindTicketsTableEvents(container, groups) {
       const idx = Number(row.dataset.index);
       const group = groups[idx] || (currentGroupedMap ? currentGroupedMap.get(row.dataset.key) : null);
       if (group && group.tickets && group.tickets[0]) {
-        window.open(`ticket.html?code=${encodeURIComponent(group.tickets[0].ticket_code)}&_t=${Date.now()}`, '_blank');
+        window.open(`ticket.html?code=${encodeURIComponent(group.tickets[0].ticket_code)}&codes=${encodeURIComponent(group.tickets.map(t => t.ticket_code).join(','))}&_t=${Date.now()}`, '_blank');
       }
     });
   });
