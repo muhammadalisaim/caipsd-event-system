@@ -196,7 +196,8 @@ function participantGroupToRow(group) {
   const codeStr = tickets.map((t, idx) => {
     const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
     const dayLabel = m ? `Day ${m[1]}` : `Day ${idx + 1}`;
-    return `${dayLabel}: ${String(t.ticket_code).replace(/^'/, '')}`;
+    const dateTag = t.event_date ? ` [${t.event_date}]` : '';
+    return `${dayLabel}${dateTag}: ${String(t.ticket_code).replace(/^'/, '')}`;
   }).join(' | ');
 
   const totalEntries = tickets.reduce((sum, t) => sum + (Number(t.entry_count) || 0), 0);
@@ -423,7 +424,7 @@ function parseCsv(text) {
     const issuedIso = issuedDate.toISOString();
     const validIso = validDate.toISOString();
 
-    const dayMatches = Array.from(rawCode.matchAll(/Day\s*(\d+)\s*:\s*([A-Za-z0-9]{8,32})/gi));
+    const dayMatches = Array.from(rawCode.matchAll(/Day\s*(\d+)(?:\s*\[([0-9-]+)\])?\s*:\s*([A-Za-z0-9]{8,32})/gi));
     if (dayMatches.length > 0) {
       const seenDays = new Map();
       for (const m of dayMatches) {
@@ -444,8 +445,8 @@ function parseCsv(text) {
           if (firstIntMatch && dayNum === 1 && parseInt(firstIntMatch[1], 10) > 0) dayEntries = 1;
         }
 
-        const passDate = new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
-        const eventDateStr = getLocalDateString(passDate);
+        const passDate = explicitDate ? new Date(explicitDate + 'T00:00:00') : new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
+        const eventDateStr = explicitDate || getLocalDateString(passDate);
 
         tickets.push({
           ticket_code: passCode,

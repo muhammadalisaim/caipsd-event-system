@@ -490,13 +490,16 @@ app.get('/api/admin/config', requireAdmin, (req, res) => {
 });
 
 app.get('/api/admin/settings/duration', requireAdmin, (req, res) => {
-  res.json({ validDays: getDefaultValidDays() });
+  res.json({ validDays: getDefaultValidDays(), startDate: getSetting('event_start_date') || '' });
 });
 
 app.post('/api/admin/settings/duration', requireAdmin, (req, res) => {
   const days = Math.max(1, Math.min(30, Number(req.body.validDays || req.body.days || 2)));
   setSetting('ticket_valid_days', String(days));
-  res.json({ validDays: days, message: `Default event duration set to ${days} day${days === 1 ? '' : 's'}.` });
+  if (req.body.startDate && /^\d{4}-\d{2}-\d{2}$/.test(req.body.startDate)) {
+    setSetting('event_start_date', req.body.startDate);
+  }
+  res.json({ validDays: days, startDate: getSetting('event_start_date') || '', message: `Event settings saved (${days} days).` });
 });
 
 app.get('/api/admin/summary', requireAdmin, (req, res) => {
@@ -559,7 +562,7 @@ app.post('/api/admin/tickets', requireAdmin, async (req, res, next) => {
 
     const baseName = rawFullName.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '').trim();
     const issued = new Date();
-    const rawStartDate = cleanText(req.body.startDate || req.body.eventDate, 20);
+    const rawStartDate = cleanText(req.body.startDate || req.body.eventDate || getSetting('event_start_date'), 20);
     let eventStart;
     if (rawStartDate && /^\d{4}-\d{2}-\d{2}$/.test(rawStartDate)) {
       eventStart = new Date(rawStartDate + 'T00:00:00');
@@ -625,7 +628,7 @@ app.post('/api/admin/tickets/bulk', requireAdmin, async (req, res, next) => {
     }
 
     const issued = new Date();
-    const rawStartDate = cleanText(req.body.startDate || req.body.eventDate, 20);
+    const rawStartDate = cleanText(req.body.startDate || req.body.eventDate || getSetting('event_start_date'), 20);
     let eventStart;
     if (rawStartDate && /^\d{4}-\d{2}-\d{2}$/.test(rawStartDate)) {
       eventStart = new Date(rawStartDate + 'T00:00:00');
@@ -856,11 +859,12 @@ async function handleCheckinRequest(req, res, next) {
 
       if (todayLocal < ticketEventDate) {
         return res.status(409).json({
-          error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (Entry Denied).`,
+          error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (${ticketEventDate}) (Entry Denied).`,
           alreadyUsed: false,
           day2Early: passDay === 2,
           dayEarly: true,
           passDay,
+          ticketEventDate,
           currentEventDay: 0,
           maxDays,
           ticket: formatTicket(ticket)
@@ -868,10 +872,11 @@ async function handleCheckinRequest(req, res, next) {
       }
       if (todayLocal > ticketEventDate) {
         return res.status(409).json({
-          error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (Entry Denied).`,
+          error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (${ticketEventDate}) (Entry Denied).`,
           alreadyUsed: (ticket.entry_count || 0) > 0,
           dayExpired: true,
           passDay,
+          ticketEventDate,
           currentEventDay: 999,
           maxDays,
           ticket: formatTicket(ticket)

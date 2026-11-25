@@ -221,7 +221,7 @@ async function loadTicket() {
                 const status = (is11 ? getV(c[6]) : getV(c[4])) || 'valid';
                 const rawEntriesStr = String((is11 ? getV(c[7]) : getV(c[5])) || '').trim();
 
-                const dayMatches = Array.from(rawCodeStr.matchAll(/Day\s*(\d+)\s*:\s*([A-Za-z0-9]{8,32})/gi));
+                const dayMatches = Array.from(rawCodeStr.matchAll(/Day\s*(\d+)(?:\s*\[([0-9-]+)\])?\s*:\s*([A-Za-z0-9]{8,32})/gi));
                 if (dayMatches.length > 0) {
                   const seenDays = new Map();
                   for (const m of dayMatches) {
@@ -241,8 +241,10 @@ async function loadTicket() {
                         dayEntries = 1;
                       }
                     }
-                    const passDate = new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
-                    const eventDateStr = `${passDate.getFullYear()}-${String(passDate.getMonth() + 1).padStart(2, '0')}-${String(passDate.getDate()).padStart(2, '0')}`;
+                    const explicitMatch = dayMatches.find((m) => parseInt(m[1], 10) === dayNum);
+                    const explicitDate = explicitMatch && explicitMatch[2] ? explicitMatch[2] : null;
+                    const passDate = explicitDate ? new Date(explicitDate + 'T00:00:00') : new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
+                    const eventDateStr = explicitDate || `${passDate.getFullYear()}-${String(passDate.getMonth() + 1).padStart(2, '0')}-${String(passDate.getDate()).padStart(2, '0')}`;
                     return {
                       full_name: `${basePerson} (Day ${dayNum})`,
                       ticket_code: passCode,

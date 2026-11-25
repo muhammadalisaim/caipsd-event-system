@@ -220,7 +220,8 @@ function formatGroupSheetRow(group) {
   const codeStr = tickets.map((t, idx) => {
     const m = (t.full_name || '').match(/\(Day\s*(\d+)\)/i);
     const dayLabel = m ? `Day ${m[1]}` : `Day ${idx + 1}`;
-    return `${dayLabel}: ${t.ticket_code}`;
+    const dateTag = t.event_date ? ` [${t.event_date}]` : '';
+    return `${dayLabel}${dateTag}: ${t.ticket_code}`;
   }).join(' | ');
 
   const totalEntries = tickets.reduce((sum, t) => sum + (Number(t.entry_count) || 0), 0);
@@ -543,7 +544,7 @@ async function syncTicketsFromGoogleSheet() {
         const firstEntry = (is11 ? getV(c[8]) : getV(c[6])) || null;
         const lastEntry = (is11 ? getV(c[9]) : getV(c[7])) || null;
 
-        const dayMatches = Array.from(rawCode.matchAll(/Day\s*(\d+)\s*:\s*([A-Za-z0-9]{8,32})/gi));
+        const dayMatches = Array.from(rawCode.matchAll(/Day\s*(\d+)(?:\s*\[([0-9-]+)\])?\s*:\s*([A-Za-z0-9]{8,32})/gi));
         if (dayMatches.length > 0) {
           const seenDays = new Map();
           for (const m of dayMatches) {
@@ -567,8 +568,10 @@ async function syncTicketsFromGoogleSheet() {
                 dayEntries = 1;
               }
             }
-            const passDate = new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
-            const eventDateStr = getLocalDateString(passDate);
+            const explicitMatch = dayMatches.find((m) => parseInt(m[1], 10) === dayNum);
+            const explicitDate = explicitMatch && explicitMatch[2] ? explicitMatch[2] : null;
+            const passDate = explicitDate ? new Date(explicitDate + 'T00:00:00') : new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
+            const eventDateStr = explicitDate || getLocalDateString(passDate);
             const gid = 'sheet_grp_' + i + '_' + (baseName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'p');
             return {
               id: Date.now() + i * 100 + dIdx,
@@ -641,6 +644,15 @@ async function syncTicketsFromGoogleSheet() {
           const k = t.ticket_code.toUpperCase();
           const existing = localMap.get(k);
           if (existing) {
+            // NEVER overwrite user-chosen event_date or group_id with defaults!
+            if (existing.event_date && (!t.event_date || t.event_date === getLocalDateString(new Date()))) {
+              t.event_date = existing.event_date;
+            }
+            if (existing.group_id) {
+              t.group_id = existing.group_id;
+            }
+            if (existing.email && !t.email) t.email = existing.email;
+            if (existing.phone && !t.phone) t.phone = existing.phone;
             // NEVER downgrade entry count if local already recorded a checkin!
             const mergedEntries = Math.max(existing.entry_count || 0, t.entry_count || 0);
             t.entry_count = mergedEntries;
@@ -1979,7 +1991,7 @@ function openTicketModal() {
   if ($('#ticket-days-select')) $('#ticket-days-select').value = String(appConfig.validDays || 2);
   const dateInput = $('#ticket-start-date');
   if (dateInput) {
-    dateInput.value = getLocalDateString(new Date());
+    dateInput.value = localStorage.getItem('caipsd_event_start_date') || getLocalDateString(new Date());
   }
   updateDatePreview($('#ticket-start-date'), $('#ticket-days-select'), $('#ticket-date-preview'));
   $('#ticket-form-error').textContent = '';
@@ -2005,7 +2017,7 @@ function openBulkModal() {
   if ($('#bulk-days-select')) $('#bulk-days-select').value = String(appConfig.validDays || 2);
   const bulkDate = $('#bulk-start-date');
   if (bulkDate) {
-    bulkDate.value = getLocalDateString(new Date());
+    bulkDate.value = localStorage.getItem('caipsd_event_start_date') || getLocalDateString(new Date());
   }
   updateDatePreview($('#bulk-start-date'), $('#bulk-days-select'), $('#bulk-date-preview'));
   if ($('#bulk-form-error')) $('#bulk-form-error').textContent = '';
@@ -2032,6 +2044,7 @@ const durationModal = $('#duration-modal');
 function openDurationModal() {
   lastFocused = document.activeElement;
   if ($('#setting-duration-select')) $('#setting-duration-select').value = String(appConfig.validDays || 2);
+  if ($('#setting-event-date')) $('#setting-event-date').value = localStorage.getItem('caipsd_event_start_date') || getLocalDateString(new Date());
   if ($('#duration-form-msg')) $('#duration-form-msg').style.display = 'none';
   if (durationModal) durationModal.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -2055,10 +2068,18 @@ $('#duration-form')?.addEventListener('submit', async (e) => {
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   if (msg) msg.style.display = 'none';
 
+  const chosenDate = $('#setting-event-date')?.value || '';
+  if (chosenDate) {
+    localStorage.setItem('caipsd_event_start_date', chosenDate);
+    if ($('#ticket-start-date')) $('#ticket-start-date').value = chosenDate;
+    if ($('#bulk-start-date')) $('#bulk-start-date').value = chosenDate;
+    updateDatePreview($('#ticket-start-date'), $('#ticket-days-select'), $('#ticket-date-preview'));
+    updateDatePreview($('#bulk-start-date'), $('#bulk-days-select'), $('#bulk-date-preview'));
+  }
   try {
     const res = await api('/api/admin/settings/duration', {
       method: 'POST',
-      body: JSON.stringify({ validDays: days })
+      body: JSON.stringify({ validDays: days, startDate: chosenDate })
     });
     appConfig.validDays = res.validDays || days;
     if ($('#topbar-days-label')) $('#topbar-days-label').textContent = `${appConfig.validDays} Day${appConfig.validDays === 1 ? '' : 's'}`;
@@ -2584,6 +2605,7 @@ $('#ticket-form')?.addEventListener('submit', async (event) => {
   button.textContent = 'Generating…';
   $('#ticket-form-error').textContent = '';
   try {
+    if (payload.startDate) localStorage.setItem('caipsd_event_start_date', payload.startDate);
     const data = await api('/api/admin/tickets', { method: 'POST', body: JSON.stringify(payload) });
     closeTicketModal();
     const baseName = data.ticket.full_name.replace(/\s*\((?:Day\s*\d+|Day\d+)\)$/i, '');
@@ -2607,6 +2629,7 @@ $('#bulk-form')?.addEventListener('submit', async (event) => {
   button.textContent = 'Generating tickets…';
   $('#bulk-form-error').textContent = '';
   try {
+    if (startDate) localStorage.setItem('caipsd_event_start_date', startDate);
     const data = await api('/api/admin/tickets/bulk', { method: 'POST', body: JSON.stringify({ names: text, days, startDate }) });
     closeBulkModal();
     const count = data.count || (data.tickets ? data.tickets.length : '');
