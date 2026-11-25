@@ -549,11 +549,15 @@ async function syncTicketsFromGoogleSheet() {
           const seenDays = new Map();
           for (const m of dayMatches) {
             const d = parseInt(m[1], 10);
-            if (!seenDays.has(d)) {
-              seenDays.set(d, m[2].toUpperCase());
+            const passCode = (m[3] || m[2] || '').toUpperCase();
+            const explicitDate = m[2] && /^\d{4}-\d{2}-\d{2}$/.test(m[2]) ? m[2] : null;
+            if (!seenDays.has(d) && passCode) {
+              seenDays.set(d, { code: passCode, date: explicitDate });
             }
           }
-          return Array.from(seenDays.entries()).map(([dayNum, code], dIdx) => {
+          return Array.from(seenDays.entries()).map(([dayNum, passInfo], dIdx) => {
+            const code = passInfo.code;
+            const explicitDate = passInfo.date;
             const dayEntryMatch = rawEntriesStr.match(new RegExp(`Day\\s*${dayNum}\\s*:\\s*(\\d+)`, 'i'));
             let dayEntries = 0;
             if (dayEntryMatch) {
@@ -568,8 +572,6 @@ async function syncTicketsFromGoogleSheet() {
                 dayEntries = 1;
               }
             }
-            const explicitMatch = dayMatches.find((m) => parseInt(m[1], 10) === dayNum);
-            const explicitDate = explicitMatch && explicitMatch[2] ? explicitMatch[2] : null;
             const passDate = explicitDate ? new Date(explicitDate + 'T00:00:00') : new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
             const eventDateStr = explicitDate || getLocalDateString(passDate);
             const gid = 'sheet_grp_' + i + '_' + (baseName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'p');

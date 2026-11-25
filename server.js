@@ -845,6 +845,7 @@ async function handleCheckinRequest(req, res, next) {
       }
     } else {
       const todayLocal = getLocalDateString(now);
+      const todayIso = now.toISOString().slice(0, 10);
       let ticketEventDate = ticket.event_date;
       if (!ticketEventDate || !/^\d{4}-\d{2}-\d{2}$/.test(ticketEventDate)) {
         const customStart = getSetting('event_start_date');
@@ -857,7 +858,8 @@ async function handleCheckinRequest(req, res, next) {
         }
       }
 
-      if (todayLocal < ticketEventDate) {
+      const isToday = ticketEventDate === todayLocal || ticketEventDate === todayIso;
+      if (!isToday && todayLocal < ticketEventDate && todayIso < ticketEventDate) {
         return res.status(409).json({
           error: `Day ${passDay} Ticket! This ticket can only be used on Day ${passDay} (${ticketEventDate}) (Entry Denied).`,
           alreadyUsed: false,
@@ -870,7 +872,7 @@ async function handleCheckinRequest(req, res, next) {
           ticket: formatTicket(ticket)
         });
       }
-      if (todayLocal > ticketEventDate) {
+      if (!isToday && todayLocal > ticketEventDate && todayIso > ticketEventDate) {
         return res.status(409).json({
           error: `Day ${passDay} Ticket! This ticket was only valid for Day ${passDay} (${ticketEventDate}) (Entry Denied).`,
           alreadyUsed: (ticket.entry_count || 0) > 0,

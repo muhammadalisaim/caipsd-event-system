@@ -70,8 +70,9 @@ function saveSheetsConfig(data) {
   if (data.sheetName !== undefined) {
     setSetting('google_sheets_sheet_name', String(data.sheetName || '').trim() || PERMANENT_SHEET_NAME);
   }
-  if (data.spreadsheetId !== undefined) {
-    const cleanedId = extractSpreadsheetId(data.spreadsheetId);
+  const inputId = data.spreadsheetId !== undefined ? data.spreadsheetId : (data.spreadsheetUrl !== undefined ? data.spreadsheetUrl : data.sheetUrl);
+  if (inputId !== undefined) {
+    const cleanedId = extractSpreadsheetId(inputId);
     setSetting('google_sheets_spreadsheet_id', cleanedId);
     if (cleanedId) {
       setSetting('google_sheets_sheet_url', `https://docs.google.com/spreadsheets/d/${cleanedId}/edit`);
@@ -429,9 +430,15 @@ function parseCsv(text) {
       const seenDays = new Map();
       for (const m of dayMatches) {
         const d = parseInt(m[1], 10);
-        if (!seenDays.has(d)) seenDays.set(d, m[2].toUpperCase());
+        const passCode = (m[3] || m[2] || '').toUpperCase();
+        const explicitDate = m[2] && /^\d{4}-\d{2}-\d{2}$/.test(m[2]) ? m[2] : null;
+        if (!seenDays.has(d) && passCode) {
+          seenDays.set(d, { code: passCode, date: explicitDate });
+        }
       }
-      for (const [dayNum, passCode] of seenDays.entries()) {
+      for (const [dayNum, passInfo] of seenDays.entries()) {
+        const passCode = passInfo.code;
+        const explicitDate = passInfo.date;
         const dayEntryMatch = rawEntriesStr.match(new RegExp(`Day\\s*${dayNum}\\s*:\\s*(\\d+)`, 'i'));
         let dayEntries = 0;
         if (dayEntryMatch) {

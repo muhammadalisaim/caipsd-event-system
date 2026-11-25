@@ -293,6 +293,7 @@
         <button class="nav-item active" data-view="overview"><span class="nav-icon">▦</span>Overview</button>
         <button class="nav-item" data-view="tickets"><span class="nav-icon">🎟</span>Tickets Manager</button>
         <button class="nav-item" id="sidebar-duration-btn"><span class="nav-icon">⚙</span>Event Duration</button>
+        <button class="nav-item" id="sidebar-sheets-btn"><span class="nav-icon">📊</span>Google Sheets</button>
       </nav>
       <div class="sidebar-bottom">
         <a href="#open-sheet" data-action="open-sheet" class="sidebar-sheet-link" title="Open Google Sheet Database">
@@ -312,6 +313,9 @@
           </button>
           <button id="topbar-duration-btn" class="topbar-btn topbar-btn-duration" title="Change Event Duration (2, 3, 4 days)">
             <i></i> <span>Duration: <strong id="topbar-days-label">2 Days</strong> ⚙</span>
+          </button>
+          <button id="topbar-sheets-btn" class="topbar-btn" title="Configure Google Sheets & Webhook">
+            <i></i> <span>📊 Sheet Settings</span>
           </button>
           <a href="#open-sheet" data-action="open-sheet" class="topbar-btn topbar-btn-sheet" title="Open permanent Google Sheet">
             <i></i> <span>Live Sheet ↗</span>
@@ -548,6 +552,38 @@
         <div class="modal-actions">
           <button type="button" class="admin-button admin-button-light" id="cancel-duration-modal">Cancel</button>
           <button type="submit" class="admin-button admin-button-primary" id="save-duration-btn">Save Duration <span>→</span></button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div id="sheets-modal" class="admin-modal-backdrop" hidden>
+    <section class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="sheets-modal-title" style="max-width: 540px;">
+      <button class="admin-modal-close" id="close-sheets-modal" aria-label="Close">×</button>
+      <div class="admin-kicker">GOOGLE SHEETS INTEGRATION</div>
+      <h2 id="sheets-modal-title">Google Sheets <em>Configuration.</em></h2>
+      <p class="modal-subcopy">Connect Google Sheet and Google Apps Script Webhook. When tickets are generated, they will automatically sync to Google Sheet.</p>
+
+      <form id="sheets-config-form" class="admin-form">
+        <label><span class="form-label-title">Google Spreadsheet URL *</span>
+          <input type="url" id="sheets-setting-url" required placeholder="https://docs.google.com/spreadsheets/d/12J1fq7Os6eCfy1pseBAcnC7daGtjn-SA-i0UgyNT00o/edit" autocomplete="off" spellcheck="false">
+        </label>
+        <label><span class="form-label-title">Google Apps Script Webhook URL *</span>
+          <input type="url" id="sheets-setting-webhook" required placeholder="https://script.google.com/macros/s/AKfycbzodcplXRQvdPQlWLPeQbGOZdomvehyFGo4wG5K_9ugWSGuFKN-sRy6hfA6cq5AV-ds2Q/exec" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="admin-form-grid">
+          <label><span class="form-label-title">Sheet Tab Name</span>
+            <input type="text" id="sheets-setting-name" value="CAIPSD_Tickets" placeholder="CAIPSD_Tickets">
+          </label>
+          <label><span class="form-label-title">Webhook Secret / Password</span>
+            <input type="text" id="sheets-setting-secret" placeholder="Event@2211">
+          </label>
+        </div>
+        <div id="sheets-form-msg" class="inline-error" style="display:none;" role="status"></div>
+        <div class="modal-actions" style="margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap;">
+          <button type="button" class="admin-button admin-button-secondary" id="test-sheets-btn">🔌 Test Connection</button>
+          <button type="button" class="admin-button admin-button-secondary" id="sync-now-sheets-btn">🔄 Push All to Sheet</button>
+          <button type="submit" class="admin-button admin-button-primary" id="save-sheets-btn" style="margin-left: auto;">Save Settings <span>→</span></button>
         </div>
       </form>
     </section>

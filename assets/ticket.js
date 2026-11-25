@@ -226,9 +226,15 @@ async function loadTicket() {
                   const seenDays = new Map();
                   for (const m of dayMatches) {
                     const d = parseInt(m[1], 10);
-                    if (!seenDays.has(d)) seenDays.set(d, m[2].toUpperCase());
+                    const passCode = (m[3] || m[2] || '').toUpperCase();
+                    const explicitDate = m[2] && /^\d{4}-\d{2}-\d{2}$/.test(m[2]) ? m[2] : null;
+                    if (!seenDays.has(d) && passCode) {
+                      seenDays.set(d, { code: passCode, date: explicitDate });
+                    }
                   }
-                  ticketsList = Array.from(seenDays.entries()).map(([dayNum, passCode]) => {
+                  ticketsList = Array.from(seenDays.entries()).map(([dayNum, passInfo]) => {
+                    const passCode = passInfo.code;
+                    const explicitDate = passInfo.date;
                     const dayEntryMatch = rawEntriesStr.match(new RegExp(`Day\\s*${dayNum}\\s*:\\s*(\\d+)`, 'i'));
                     let dayEntries = 0;
                     if (dayEntryMatch) {
@@ -241,8 +247,6 @@ async function loadTicket() {
                         dayEntries = 1;
                       }
                     }
-                    const explicitMatch = dayMatches.find((m) => parseInt(m[1], 10) === dayNum);
-                    const explicitDate = explicitMatch && explicitMatch[2] ? explicitMatch[2] : null;
                     const passDate = explicitDate ? new Date(explicitDate + 'T00:00:00') : new Date(issuedDate.getTime() + (dayNum - 1) * 86400000);
                     const eventDateStr = explicitDate || `${passDate.getFullYear()}-${String(passDate.getMonth() + 1).padStart(2, '0')}-${String(passDate.getDate()).padStart(2, '0')}`;
                     return {
